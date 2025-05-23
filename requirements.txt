@@ -1,0 +1,3 @@
+asyncio
+websockets<=12.0
+python-dotenv

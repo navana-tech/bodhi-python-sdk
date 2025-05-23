@@ -1,0 +1,108 @@
+import asyncio
+import os
+import asyncio
+import wave
+import logging
+from dotenv import load_dotenv
+from bodhi import (
+    BodhiClient,
+    TranscriptionConfig,
+    TranscriptionResponse,
+    LiveTranscriptionEvents,
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# Load credentials from .env file
+load_dotenv()
+API_KEY = os.getenv("BODHI_API_KEY")
+CUSTOMER_ID = os.getenv("BODHI_CUSTOMER_ID")
+
+
+async def on_transcript(response: TranscriptionResponse):
+    logging.info(f"Transcript: {response.text}")
+
+
+async def on_utterance_end(response: TranscriptionResponse):
+    logging.info(f"UtteranceEnd: {response}")
+
+
+async def on_speech_started(response: TranscriptionResponse):
+    logging.info(f"SpeechStarted: {response}")
+
+
+async def on_error(e: Exception):
+    logging.error(f"Error: {str(e)}")
+
+
+async def on_close():
+    logging.info("WebSocket connection closed.")
+
+
+async def main():
+    if not API_KEY or not CUSTOMER_ID:
+        logging.error(
+            "Please set BODHI_API_KEY and BODHI_CUSTOMER_ID environment variables"
+        )
+        raise ValueError(
+            "Please set BODHI_API_KEY and BODHI_CUSTOMER_ID environment variables"
+        )
+
+    client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)
+
+    # Register event listeners
+    client.on(LiveTranscriptionEvents.Transcript, on_transcript)
+    client.on(LiveTranscriptionEvents.UtteranceEnd, on_utterance_end)
+    client.on(LiveTranscriptionEvents.SpeechStarted, on_speech_started)
+    client.on(LiveTranscriptionEvents.Error, on_error)
+    client.on(LiveTranscriptionEvents.Close, on_close)
+
+    # Example configuration
+    config = TranscriptionConfig(
+        model="hi-banking-v2-8khz",
+    )
+
+    try:
+        # Start streaming session
+        await client.start_connection(config=config)
+
+        # Example: Stream audio data in chunks
+        # In a real application, this could be from a microphone or other source
+        audio_file = os.path.join(os.path.dirname(__file__), "loan.wav")
+        if not os.path.exists(audio_file):
+            logging.error(f"Audio file not found: {audio_file}")
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
+
+        with wave.open(audio_file, "rb") as wf:
+            sample_rate = wf.getframerate()
+            # Update config with the actual sample rate
+            config.sample_rate = sample_rate
+            logging.info(f"Using sample rate: {sample_rate}")
+
+            # Start streaming session with updated config
+            await client.start_connection(config=config)
+
+            # Calculate chunk size (e.g., 100ms of audio)
+            chunk_size = int(sample_rate * 0.1)
+            logging.info(f"Using chunk size: {chunk_size}")
+
+            while True:
+                chunk = wf.readframes(chunk_size)
+                if not chunk:
+                    break
+                await client.send_audio_stream(chunk)
+                # await asyncio.sleep(0.1)
+
+        # Finish streaming and get final results
+        result = await client.close_connection()
+        logging.info("Final result: %s", result)
+
+    except Exception as e:
+        print(f"Error during streaming: {str(e)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
