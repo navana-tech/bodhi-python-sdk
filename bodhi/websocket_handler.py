@@ -119,33 +119,23 @@ class WebSocketHandler(EventEmitter):
 
                 if response_data.get("error"):
                     e = response_data.get("error")
-                    if "transaction_id is missing" in str():
-                        await self.emit(
-                            LiveTranscriptionEvents.Error,
-                            MissingTransactionIDError(e),
-                        )
-                        raise
+                    error = None
+                    if "transaction_id is missing" in str(e):
+                        error = MissingTransactionIDError(e)
                     elif "invalid transaction_id" in str(e):
-                        await self.emit(
-                            LiveTranscriptionEvents.Error,
-                            InvalidTransactionIDError(e),
-                        )
+                        error = InvalidTransactionIDError(e)
                     elif "model is missing" in str(e):
-                        await self.emit(
-                            LiveTranscriptionEvents.Error,
-                            MissingModelError(e),
-                        )
+                        error = MissingModelError(e)
                     elif "model '" in str(e) and "' is not available" in str(e):
-                        await self.emit(
-                            LiveTranscriptionEvents.Error,
-                            ModelNotAvailableError(e),
-                        )
+                        error = ModelNotAvailableError(e)
                     else:
-                        await self.emit(
-                            LiveTranscriptionEvents.Error,
-                            BodhiAPIError(error_msg),
-                        )
-                    return
+                        error = BodhiAPIError(e)
+                    await self.emit(LiveTranscriptionEvents.Error, error)
+                    # Cancel any ongoing tasks
+                    for task in asyncio.all_tasks():
+                        if task != asyncio.current_task():
+                            task.cancel()
+                    return complete_sentences
 
                 socket_response = TranscriptionResponse(
                     call_id=response_data["call_id"],
