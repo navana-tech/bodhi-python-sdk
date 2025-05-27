@@ -11,15 +11,13 @@ import tempfile
 from .utils.logger import logger
 from .transcription_config import TranscriptionConfig
 from .audio_processor import AudioProcessor
-from .utils.exceptions import (
+from bodhi.utils.exceptions import (
     ConfigurationError,
     ConnectionError,
     StreamingError,
-    InvalidURLError,
-    EmptyAudioError,
-    InvalidAudioFormatError,
-    AudioDownloadError,
-    FileNotFoundError,
+    AuthenticationError,
+    PaymentRequiredError,
+    ForbiddenError,
 )
 
 
@@ -43,13 +41,23 @@ class TranscriptionHandler:
             ConfigurationError: If configuration is invalid
         """
         if config is None:
-            logger.debug("No config provided, creating default Config instance")
-            config = TranscriptionConfig()
-        if not hasattr(config, "model"):
-            error_msg = "Config must include 'model' field"
+            error_msg = (
+                "model is a required argument - transcription config must be defined."
+            )
+            raise ConfigurationError(error_msg)
+
+        if not hasattr(config, "model") or config.model is None:
+            error_msg = (
+                "model is a required argument - transcription config must be defined."
+            )
+            raise ConfigurationError(error_msg)
+
+        if not hasattr(config, "sample_rate") or config.sample_rate is None:
+            error_msg = "sample_rate is a required argument - transcription config must be defined."
             logger.error(error_msg)
             raise ConfigurationError(error_msg)
 
+        self.config = config
         config_instance = TranscriptionConfig(
             model=config.model,
             transaction_id=getattr(config, "transaction_id", str(uuid.uuid4())),
@@ -83,7 +91,6 @@ class TranscriptionHandler:
             final_config = self._prepare_config(config)
 
             self.ws = await self.websocket_handler.connect()
-            print(final_config, "final_config...")
             await self.websocket_handler.send_config(self.ws, final_config)
             # Pass the callbacks from BodhiClient to WebSocketHandler
             self.recv_task = asyncio.create_task(
@@ -95,6 +102,14 @@ class TranscriptionHandler:
 
         except Exception as e:
             error_msg = f"Failed to start streaming session: {str(e)}"
+            if "401" in str(e):
+                error_msg = "Authentication failed: Invalid API Key or Customer ID."
+            elif "402" in str(e):
+                error_msg = "Payment required: Please check your subscription."
+            elif "403" in str(e):
+                error_msg = (
+                    "Forbidden: You do not have permission to access this resource."
+                )
             logger.error(error_msg, exc_info=True)
             raise ConnectionError(error_msg)
 
@@ -296,14 +311,14 @@ class TranscriptionHandler:
                 f"Audio parameters: channels={channels}, sample_rate={sample_rate}, num_samples={num_samples}"
             )
 
+            config.sample_rate = sample_rate
             final_config = self._prepare_config(config)
-            final_config["sample_rate"] = sample_rate
 
             ws = await self.websocket_handler.connect()
             await self.websocket_handler.send_config(ws, final_config)
 
-            buffer_size = int(sample_rate * 0.1)  # 100ms chunks
-            interval_seconds = 0.1
+            buffer_size = int(sample_rate * 0.02)  # 20ms chunks
+            interval_seconds = 0.02  # 20ms interval
             logger.debug(
                 f"Audio processing parameters: buffer_size={buffer_size}, interval={interval_seconds}s"
             )
@@ -333,6 +348,18 @@ class TranscriptionHandler:
             raise AudioDownloadError(error_msg)
         except Exception as e:
             error_msg = f"Failed to transcribe audio file: {str(e)}"
+            if "401" in str(e):
+                raise AuthenticationError(
+                    "Authentication failed: Invalid API Key or Customer ID."
+                )
+            elif "402" in str(e):
+                raise PaymentRequiredError(
+                    "Payment required: Please check your subscription."
+                )
+            elif "403" in str(e):
+                raise ForbiddenError(
+                    "Forbidden: You do not have permission to access this resource."
+                )
             logger.error(error_msg, exc_info=True)
             if on_error:
                 await on_error(e)

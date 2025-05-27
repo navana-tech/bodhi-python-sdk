@@ -15,6 +15,10 @@ from .utils.exceptions import (
     WebSocketConnectionClosedError,
     WebSocketTimeoutError,
     WebSocketError,
+    ModelNotAvailableError,
+    MissingModelError,
+    InvalidTransactionIDError,
+    MissingTransactionIDError,
 )
 from .transcription_response import TranscriptionResponse, SegmentMeta, Word
 from .events import LiveTranscriptionEvents
@@ -114,12 +118,33 @@ class WebSocketHandler(EventEmitter):
                 response_data = json.loads(response)
 
                 if response_data.get("error"):
-                    await self.emit(
-                        LiveTranscriptionEvents.Error,
-                        BodhiAPIError(
-                            f"Error from Bodhi API: {response_data['error']}"
-                        ),
-                    )
+                    e = response_data.get("error")
+                    if "transaction_id is missing" in str():
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            MissingTransactionIDError(e),
+                        )
+                        raise
+                    elif "invalid transaction_id" in str(e):
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            InvalidTransactionIDError(e),
+                        )
+                    elif "model is missing" in str(e):
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            MissingModelError(e),
+                        )
+                    elif "model '" in str(e) and "' is not available" in str(e):
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            ModelNotAvailableError(e),
+                        )
+                    else:
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            BodhiAPIError(error_msg),
+                        )
                     return
 
                 socket_response = TranscriptionResponse(

@@ -66,8 +66,6 @@ async def main():
     )
 
     try:
-        # Start streaming session
-        await client.start_connection(config=config)
 
         # Example: Stream audio data in chunks
         # In a real application, this could be from a microphone or other source
@@ -82,11 +80,11 @@ async def main():
             config.sample_rate = sample_rate
             logging.info(f"Using sample rate: {sample_rate}")
 
-            # Start streaming session with updated config
+            # Start streaming session with config
             await client.start_connection(config=config)
 
-            # Calculate chunk size (e.g., 100ms of audio)
-            chunk_size = int(sample_rate * 0.1)
+            # Calculate chunk size (e.g., 20ms of audio)
+            chunk_size = int(sample_rate * 0.02)
             logging.info(f"Using chunk size: {chunk_size}")
 
             while True:
