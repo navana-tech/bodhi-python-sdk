@@ -4,6 +4,7 @@ import wave
 import asyncio
 from typing import BinaryIO, Any
 from .utils.logger import logger
+from . import EOF_SIGNAL
 
 
 class AudioProcessor:
@@ -35,7 +36,7 @@ class AudioProcessor:
                 await asyncio.sleep(REALTIME_RESOLUTION)
 
             if not ws.closed:
-                await ws.send('{"eof": 1}')
+                await ws.send(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
         except Exception as e:
             logger.error(f"Error processing audio file: {str(e)}")

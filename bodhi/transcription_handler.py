@@ -20,6 +20,7 @@ from bodhi.utils.exceptions import (
     ForbiddenError,
 )
 from bodhi.events import LiveTranscriptionEvents
+from . import EOF_SIGNAL
 
 
 class TranscriptionHandler:
@@ -28,6 +29,31 @@ class TranscriptionHandler:
         self.ws = None
         self.send_task = None
         self.recv_task = None
+
+    async def _handle_api_error(self, e: Exception):
+        """Handle API-related errors and emit appropriate events."""
+        error_msg = f"Failed to transcribe audio file: {str(e)}"
+        error = None
+        if hasattr(e, "status_code"):
+            if e.status_code == 401:
+                error_msg = "Authentication failed: Invalid API Key or Customer ID."
+                error = AuthenticationError(error_msg)
+            elif e.status_code == 402:
+                error_msg = "Payment required: Please check your subscription."
+                error = PaymentRequiredError(error_msg)
+            elif e.status_code == 403:
+                error_msg = (
+                    "Forbidden: You do not have permission to access this resource."
+                )
+                error = ForbiddenError(error_msg)
+            else:
+                error_msg = f"Failed to start streaming session: {str(e)}"
+                error = ConnectionError(error_msg)
+        else:
+            error_msg = f"Failed to start streaming session: {str(e)}"
+            error = ConnectionError(error_msg)
+        logger.error(error_msg)
+        await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
 
     def _prepare_config(self, config: Optional[TranscriptionConfig] = None) -> dict:
         """Prepare configuration dictionary from TranscriptionConfig instance.
@@ -42,9 +68,7 @@ class TranscriptionHandler:
             ConfigurationError: If configuration is invalid
         """
         if config is None:
-            error_msg = (
-                "transcription config must be defined."
-            )
+            error_msg = "transcription config must be defined."
             raise ConfigurationError(error_msg)
 
         if not hasattr(config, "model") or config.model is None:
@@ -102,10 +126,7 @@ class TranscriptionHandler:
             logger.info("Started streaming session and processing stream")
 
         except Exception as e:
-            error_msg = f"Failed to start streaming session: {str(e)}"
-            error = ConnectionError(error_msg)
-            logger.error(error_msg)
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            await self._handle_api_error(e)
             return
 
     async def stream_audio(self, audio_data: bytes) -> List[str]:
@@ -154,7 +175,7 @@ class TranscriptionHandler:
 
         try:
             if not self.ws.closed:
-                await self.ws.send('{"eof": 1}')
+                await self.ws.send(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
                 try:
                     result = await asyncio.gather(self.recv_task)
@@ -362,21 +383,7 @@ class TranscriptionHandler:
         except Exception as e:
             error_msg = f"Failed to transcribe audio file: {str(e)}"
             error = None
-            if e.status_code == 401:
-                error_msg = "Authentication failed: Invalid API Key or Customer ID."
-                error = AuthenticationError(error_msg)
-            elif e.status_code == 402:
-                error_msg = "Payment required: Please check your subscription."
-                error = PaymentRequiredError(error_msg)
-            elif e.status_code == 403:
-                error_msg = (
-                    "Forbidden: You do not have permission to access this resource."
-                )
-                error = ForbiddenError(error_msg)
-            else:
-                error = StreamingError(error_msg)
-            logger.error(error_msg)
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            await self._handle_api_error(e)
             return []
         finally:
             if temp_audio:

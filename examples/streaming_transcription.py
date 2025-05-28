@@ -95,8 +95,6 @@ async def main():
                 audio_cursor += REALTIME_RESOLUTION
                 await asyncio.sleep(REALTIME_RESOLUTION)
 
-            await client.send_audio_stream(b'{"eof": 1}')
-
         # Finish streaming and get final results
         result = await client.close_connection()
         logging.info("Final result: %s", result)
