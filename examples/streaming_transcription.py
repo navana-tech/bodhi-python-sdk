@@ -83,16 +83,19 @@ async def main():
             # Start streaming session with config
             await client.start_connection(config=config)
 
-            # Calculate chunk size (e.g., 20ms of audio)
-            chunk_size = int(sample_rate * 0.02)
-            logging.info(f"Using chunk size: {chunk_size}")
+            REALTIME_RESOLUTION = 0.02  # 20ms
+            byte_rate = sample_rate * wf.getsampwidth() * wf.getnchannels()
+            data = wf.readframes(wf.getnframes())
+            audio_cursor = 0
 
-            while True:
-                chunk = wf.readframes(chunk_size)
-                if not chunk:
-                    break
+            while len(data):
+                i = int(byte_rate * REALTIME_RESOLUTION)
+                chunk, data = data[:i], data[i:]
                 await client.send_audio_stream(chunk)
-                # await asyncio.sleep(0.1)
+                audio_cursor += REALTIME_RESOLUTION
+                await asyncio.sleep(REALTIME_RESOLUTION)
+
+            await client.send_audio_stream(b'{"eof": 1}')
 
         # Finish streaming and get final results
         result = await client.close_connection()

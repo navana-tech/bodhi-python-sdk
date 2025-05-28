@@ -103,21 +103,7 @@ class TranscriptionHandler:
 
         except Exception as e:
             error_msg = f"Failed to start streaming session: {str(e)}"
-            error = None
-            if "401" in str(e):
-                error = AuthenticationError(
-                    "Authentication failed: Invalid API Key or Customer ID."
-                )
-            elif "402" in str(e):
-                error = PaymentRequiredError(
-                    "Payment required: Please check your subscription."
-                )
-            elif "403" in str(e):
-                error = ForbiddenError(
-                    "Forbidden: You do not have permission to access this resource."
-                )
-            else:
-                error = ConnectionError(error_msg)
+            error = ConnectionError(error_msg)
             logger.error(error_msg)
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
             return
@@ -176,7 +162,6 @@ class TranscriptionHandler:
                     logger.info("Finished streaming session")
                     return result[0]  # Extract result from gather tuple
                 except asyncio.CancelledError:
-                    logger.warning("Transcription tasks cancelled")
                     error = ConnectionError("Transcription tasks cancelled")
                     await self.websocket_handler.emit(
                         LiveTranscriptionEvents.Error, error
@@ -352,15 +337,7 @@ class TranscriptionHandler:
             ws = await self.websocket_handler.connect()
             await self.websocket_handler.send_config(ws, final_config)
 
-            buffer_size = int(sample_rate * 0.02)  # 20ms chunks
-            interval_seconds = 0.02  # 20ms interval
-            logger.debug(
-                f"Audio processing parameters: buffer_size={buffer_size}, interval={interval_seconds}s"
-            )
-
-            send_task = asyncio.create_task(
-                AudioProcessor.process_file(ws, wf, buffer_size, interval_seconds)
-            )
+            send_task = asyncio.create_task(AudioProcessor.process_file(ws, wf))
             recv_task = asyncio.create_task(
                 self.websocket_handler.process_transcription_stream(ws)
             )
@@ -372,7 +349,6 @@ class TranscriptionHandler:
                     1
                 ]  # Return complete_sentences from process_transcription_stream
             except asyncio.CancelledError:
-                logger.warning("Transcription tasks cancelled")
                 error = ConnectionError("Transcription tasks cancelled")
                 await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
                 return []
@@ -386,20 +362,17 @@ class TranscriptionHandler:
         except Exception as e:
             error_msg = f"Failed to transcribe audio file: {str(e)}"
             error = None
-            if "401" in str(e):
-                error = AuthenticationError(
-                    "Authentication failed: Invalid API Key or Customer ID."
-                )
-            elif "402" in str(e):
-                error = PaymentRequiredError(
-                    "Payment required: Please check your subscription."
-                )
-            elif "403" in str(e):
-                error = ForbiddenError(
+            if e.status_code == 401:
+                error_msg = "Authentication failed: Invalid API Key or Customer ID."
+                error = AuthenticationError(error_msg)
+            elif e.status_code == 402:
+                error_msg = "Payment required: Please check your subscription."
+                error = PaymentRequiredError(error_msg)
+            elif e.status_code == 403:
+                error_msg = (
                     "Forbidden: You do not have permission to access this resource."
                 )
-            elif "model" in str(e) and "not available" in str(e):
-                error = ModelNotAvailableError(str(e))
+                error = ForbiddenError(error_msg)
             else:
                 error = StreamingError(error_msg)
             logger.error(error_msg)

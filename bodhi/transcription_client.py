@@ -51,11 +51,6 @@ class BodhiClient:
             self.api_key, self.customer_id, self.websocket_url
         )
         self.transcription_handler = TranscriptionHandler(self.websocket_handler)
-        # Remove callback attributes
-        # self.on_transcription: Optional[Callable[[TranscriptionResponse], None]] = None
-        # self.on_error: Optional[Callable[[Exception], None]] = None
-
-        logger.info(f"Initialized Bodhi client with URI: {self.websocket_url}")
 
     async def start_connection(
         self, config: Optional[TranscriptionConfig] = None

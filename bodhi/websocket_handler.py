@@ -12,13 +12,8 @@ from .utils.logger import logger
 from .utils.exceptions import (
     BodhiAPIError,
     InvalidJSONError,
-    WebSocketConnectionClosedError,
     WebSocketTimeoutError,
     WebSocketError,
-    ModelNotAvailableError,
-    MissingModelError,
-    InvalidTransactionIDError,
-    MissingTransactionIDError,
 )
 from .transcription_response import TranscriptionResponse, SegmentMeta, Word
 from .events import LiveTranscriptionEvents
@@ -120,16 +115,7 @@ class WebSocketHandler(EventEmitter):
                 if response_data.get("error"):
                     e = response_data.get("error")
                     error = None
-                    if "transaction_id is missing" in str(e):
-                        error = MissingTransactionIDError(e)
-                    elif "invalid transaction_id" in str(e):
-                        error = InvalidTransactionIDError(e)
-                    elif "model is missing" in str(e):
-                        error = MissingModelError(e)
-                    elif "model '" in str(e) and "' is not available" in str(e):
-                        error = ModelNotAvailableError(e)
-                    else:
-                        error = BodhiAPIError(e)
+                    error = BodhiAPIError(e)
                     await self.emit(LiveTranscriptionEvents.Error, error)
                     # Cancel any ongoing tasks
                     for task in asyncio.all_tasks():
