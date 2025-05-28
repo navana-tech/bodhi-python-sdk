@@ -12,7 +12,6 @@ from .utils.logger import logger
 from .utils.exceptions import (
     BodhiAPIError,
     InvalidJSONError,
-    WebSocketConnectionClosedError,
     WebSocketTimeoutError,
     WebSocketError,
 )
@@ -114,13 +113,15 @@ class WebSocketHandler(EventEmitter):
                 response_data = json.loads(response)
 
                 if response_data.get("error"):
-                    await self.emit(
-                        LiveTranscriptionEvents.Error,
-                        BodhiAPIError(
-                            f"Error from Bodhi API: {response_data['error']}"
-                        ),
-                    )
-                    return
+                    e = response_data.get("error")
+                    error = None
+                    error = BodhiAPIError(e)
+                    await self.emit(LiveTranscriptionEvents.Error, error)
+                    # Cancel any ongoing tasks
+                    for task in asyncio.all_tasks():
+                        if task != asyncio.current_task():
+                            task.cancel()
+                    return complete_sentences
 
                 socket_response = TranscriptionResponse(
                     call_id=response_data["call_id"],

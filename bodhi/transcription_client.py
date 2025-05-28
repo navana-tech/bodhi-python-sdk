@@ -11,6 +11,7 @@ from .transcription_response import TranscriptionResponse
 from .utils.logger import logger
 from .utils.exceptions import ConfigurationError, ConnectionError, StreamingError
 from .events import LiveTranscriptionEvents
+import uuid
 
 
 chunk_duration_ms = 100
@@ -40,16 +41,16 @@ class BodhiClient:
             logger.error("Customer ID not provided and not found in environment")
             raise ConfigurationError("Customer ID is required")
 
+        try:
+            uuid.UUID(self.customer_id)
+        except ValueError:
+            raise ConfigurationError("Customer ID must be a valid UUID.")
+
         self.websocket_url = uri or "wss://bodhi.navana.ai"
         self.websocket_handler = WebSocketHandler(
             self.api_key, self.customer_id, self.websocket_url
         )
         self.transcription_handler = TranscriptionHandler(self.websocket_handler)
-        # Remove callback attributes
-        # self.on_transcription: Optional[Callable[[TranscriptionResponse], None]] = None
-        # self.on_error: Optional[Callable[[Exception], None]] = None
-
-        logger.info(f"Initialized Bodhi client with URI: {self.websocket_url}")
 
     async def start_connection(
         self, config: Optional[TranscriptionConfig] = None

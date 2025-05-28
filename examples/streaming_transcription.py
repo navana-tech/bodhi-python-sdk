@@ -66,8 +66,6 @@ async def main():
     )
 
     try:
-        # Start streaming session
-        await client.start_connection(config=config)
 
         # Example: Stream audio data in chunks
         # In a real application, this could be from a microphone or other source
@@ -82,19 +80,20 @@ async def main():
             config.sample_rate = sample_rate
             logging.info(f"Using sample rate: {sample_rate}")
 
-            # Start streaming session with updated config
+            # Start streaming session with config
             await client.start_connection(config=config)
 
-            # Calculate chunk size (e.g., 100ms of audio)
-            chunk_size = int(sample_rate * 0.1)
-            logging.info(f"Using chunk size: {chunk_size}")
+            REALTIME_RESOLUTION = 0.02  # 20ms
+            byte_rate = sample_rate * wf.getsampwidth() * wf.getnchannels()
+            data = wf.readframes(wf.getnframes())
+            audio_cursor = 0
 
-            while True:
-                chunk = wf.readframes(chunk_size)
-                if not chunk:
-                    break
+            while len(data):
+                i = int(byte_rate * REALTIME_RESOLUTION)
+                chunk, data = data[:i], data[i:]
                 await client.send_audio_stream(chunk)
-                # await asyncio.sleep(0.1)
+                audio_cursor += REALTIME_RESOLUTION
+                await asyncio.sleep(REALTIME_RESOLUTION)
 
         # Finish streaming and get final results
         result = await client.close_connection()

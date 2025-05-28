@@ -11,16 +11,16 @@ import tempfile
 from .utils.logger import logger
 from .transcription_config import TranscriptionConfig
 from .audio_processor import AudioProcessor
-from .utils.exceptions import (
+from bodhi.utils.exceptions import (
     ConfigurationError,
     ConnectionError,
     StreamingError,
-    InvalidURLError,
-    EmptyAudioError,
-    InvalidAudioFormatError,
-    AudioDownloadError,
-    FileNotFoundError,
+    AuthenticationError,
+    PaymentRequiredError,
+    ForbiddenError,
 )
+from bodhi.events import LiveTranscriptionEvents
+from . import EOF_SIGNAL
 
 
 class TranscriptionHandler:
@@ -29,6 +29,31 @@ class TranscriptionHandler:
         self.ws = None
         self.send_task = None
         self.recv_task = None
+
+    async def _handle_api_error(self, e: Exception):
+        """Handle API-related errors and emit appropriate events."""
+        error_msg = f"Failed to transcribe audio file: {str(e)}"
+        error = None
+        if hasattr(e, "status_code"):
+            if e.status_code == 401:
+                error_msg = "Authentication failed: Invalid API Key or Customer ID."
+                error = AuthenticationError(error_msg)
+            elif e.status_code == 402:
+                error_msg = "Payment required: Please check your subscription."
+                error = PaymentRequiredError(error_msg)
+            elif e.status_code == 403:
+                error_msg = (
+                    "Forbidden: You do not have permission to access this resource."
+                )
+                error = ForbiddenError(error_msg)
+            else:
+                error_msg = f"Failed to start streaming session: {str(e)}"
+                error = ConnectionError(error_msg)
+        else:
+            error_msg = f"Failed to start streaming session: {str(e)}"
+            error = ConnectionError(error_msg)
+        logger.error(error_msg)
+        await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
 
     def _prepare_config(self, config: Optional[TranscriptionConfig] = None) -> dict:
         """Prepare configuration dictionary from TranscriptionConfig instance.
@@ -43,13 +68,21 @@ class TranscriptionHandler:
             ConfigurationError: If configuration is invalid
         """
         if config is None:
-            logger.debug("No config provided, creating default Config instance")
-            config = TranscriptionConfig()
-        if not hasattr(config, "model"):
-            error_msg = "Config must include 'model' field"
+            error_msg = "transcription config must be defined."
+            raise ConfigurationError(error_msg)
+
+        if not hasattr(config, "model") or config.model is None:
+            error_msg = (
+                "model is a required argument - transcription config must be defined."
+            )
+            raise ConfigurationError(error_msg)
+
+        if not hasattr(config, "sample_rate") or config.sample_rate is None:
+            error_msg = "sample_rate is a required argument - transcription config must be defined."
             logger.error(error_msg)
             raise ConfigurationError(error_msg)
 
+        self.config = config
         config_instance = TranscriptionConfig(
             model=config.model,
             transaction_id=getattr(config, "transaction_id", str(uuid.uuid4())),
@@ -83,7 +116,6 @@ class TranscriptionHandler:
             final_config = self._prepare_config(config)
 
             self.ws = await self.websocket_handler.connect()
-            print(final_config, "final_config...")
             await self.websocket_handler.send_config(self.ws, final_config)
             # Pass the callbacks from BodhiClient to WebSocketHandler
             self.recv_task = asyncio.create_task(
@@ -94,9 +126,8 @@ class TranscriptionHandler:
             logger.info("Started streaming session and processing stream")
 
         except Exception as e:
-            error_msg = f"Failed to start streaming session: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise ConnectionError(error_msg)
+            await self._handle_api_error(e)
+            return
 
     async def stream_audio(self, audio_data: bytes) -> List[str]:
         """Stream audio data to the WebSocket connection and process results.
@@ -110,7 +141,9 @@ class TranscriptionHandler:
         if not self.ws or self.ws.closed:
             error_msg = "WebSocket connection is not established or closed"
             logger.error(error_msg)
-            raise StreamingError(error_msg)
+            error = StreamingError(error_msg)
+            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            return
 
         try:
             from io import BytesIO
@@ -119,8 +152,10 @@ class TranscriptionHandler:
             await AudioProcessor.process_stream(stream, self.ws)
         except Exception as e:
             error_msg = f"Failed to stream audio data: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise StreamingError(error_msg)
+            logger.error(error_msg)
+            error = StreamingError(error_msg)
+            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            return
 
     async def finish_streaming(self) -> List[str]:
         """Finish streaming session and get transcription results.
@@ -134,26 +169,32 @@ class TranscriptionHandler:
         if not self.ws:
             error_msg = "No active streaming session"
             logger.error(error_msg)
-            raise ConnectionError(error_msg)
+            error = ConnectionError(error_msg)
+            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            return []
 
         try:
             if not self.ws.closed:
-                await self.ws.send('{"eof": 1}')
+                await self.ws.send(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
-                # Wait for the receive task to complete using gather
                 try:
                     result = await asyncio.gather(self.recv_task)
                     await self.ws.close()
                     logger.info("Finished streaming session")
                     return result[0]  # Extract result from gather tuple
                 except asyncio.CancelledError:
-                    logger.warning("Transcription tasks cancelled")
-                    raise
+                    error = ConnectionError("Transcription tasks cancelled")
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error, error
+                    )
+                    return []
             return []
         except Exception as e:
             error_msg = f"Failed to finish streaming: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise ConnectionError(error_msg)
+            logger.error(error_msg)
+            error = ConnectionError(error_msg)
+            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            return []
         finally:
             self.ws = None
 
@@ -247,7 +288,11 @@ class TranscriptionHandler:
                 if not source.startswith(("http://", "https://")):
                     error_msg = f"Invalid URL format: {source}"
                     logger.error(error_msg)
-                    raise InvalidURLError(error_msg)
+                    error = InvalidURLError(error_msg)
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error, error
+                    )
+                    return []
 
                 temp_audio = tempfile.NamedTemporaryFile(delete=True)
                 logger.debug(f"Downloading audio from URL to temporary file")
@@ -270,14 +315,23 @@ class TranscriptionHandler:
                 if total_size == 0:
                     error_msg = "Downloaded audio file is empty"
                     logger.error(error_msg)
-                    raise EmptyAudioError(error_msg)
+                    error = EmptyAudioError(error_msg)
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error, error
+                    )
+                    return []
 
                 source = temp_audio.name
             else:
                 # Validate local file exists
                 if not os.path.exists(source):
-                    logger.error(f"Audio file not found: {source}")
-                    raise FileNotFoundError(f"Audio file not found: {source}")
+                    error_msg = f"Audio file not found: {source}"
+                    logger.error(error_msg)
+                    error = FileNotFoundError(error_msg)
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error, error
+                    )
+                    return []
 
             # Validate file format
             logger.debug(f"Validating audio file format: {source}")
@@ -286,9 +340,11 @@ class TranscriptionHandler:
                 if header != b"RIFF":
                     error_msg = f"Invalid audio file format. Expected WAV file, got file with header: {header}"
                     logger.error(error_msg)
-                    if on_error:
-                        await on_error(InvalidAudioFormatError(error_msg))
-                    raise InvalidAudioFormatError(error_msg)
+                    error = InvalidAudioFormatError(error_msg)
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error, error
+                    )
+                    return []
 
             wf = wave.open(source, "rb")
             (channels, sample_width, sample_rate, num_samples, _, _) = wf.getparams()
@@ -296,21 +352,13 @@ class TranscriptionHandler:
                 f"Audio parameters: channels={channels}, sample_rate={sample_rate}, num_samples={num_samples}"
             )
 
+            config.sample_rate = sample_rate
             final_config = self._prepare_config(config)
-            final_config["sample_rate"] = sample_rate
 
             ws = await self.websocket_handler.connect()
             await self.websocket_handler.send_config(ws, final_config)
 
-            buffer_size = int(sample_rate * 0.1)  # 100ms chunks
-            interval_seconds = 0.1
-            logger.debug(
-                f"Audio processing parameters: buffer_size={buffer_size}, interval={interval_seconds}s"
-            )
-
-            send_task = asyncio.create_task(
-                AudioProcessor.process_file(ws, wf, buffer_size, interval_seconds)
-            )
+            send_task = asyncio.create_task(AudioProcessor.process_file(ws, wf))
             recv_task = asyncio.create_task(
                 self.websocket_handler.process_transcription_stream(ws)
             )
@@ -322,21 +370,21 @@ class TranscriptionHandler:
                     1
                 ]  # Return complete_sentences from process_transcription_stream
             except asyncio.CancelledError:
-                logger.warning("Transcription tasks cancelled")
-                raise
+                error = ConnectionError("Transcription tasks cancelled")
+                await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+                return []
 
         except requests.exceptions.RequestException as e:
             error_msg = f"Failed to download audio from URL: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            if on_error:
-                await on_error(e)
-            raise AudioDownloadError(error_msg)
+            logger.error(error_msg)
+            error = AudioDownloadError(error_msg)
+            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+            return []
         except Exception as e:
             error_msg = f"Failed to transcribe audio file: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            if on_error:
-                await on_error(e)
-            raise StreamingError(error_msg)
+            error = None
+            await self._handle_api_error(e)
+            return []
         finally:
             if temp_audio:
                 temp_audio.close()
