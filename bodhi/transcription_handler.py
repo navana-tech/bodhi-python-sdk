@@ -43,7 +43,7 @@ class TranscriptionHandler:
         """
         if config is None:
             error_msg = (
-                "model is a required argument - transcription config must be defined."
+                "transcription config must be defined."
             )
             raise ConfigurationError(error_msg)
 
