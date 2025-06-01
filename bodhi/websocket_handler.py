@@ -3,10 +3,9 @@
 import asyncio
 import json
 import ssl
-import websockets
-from typing import Any, Callable, Optional
+from typing import Any, Dict, Optional, Union
 
-# import EventEmitter
+import aiohttp
 
 from .utils.logger import logger
 from .utils.exceptions import (
@@ -60,6 +59,7 @@ class WebSocketHandler(EventEmitter):
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.session = None
         self.last_segment_id = None
 
     async def connect(self) -> Any:
@@ -74,13 +74,43 @@ class WebSocketHandler(EventEmitter):
         }
 
         connect_kwargs = {
-            "extra_headers": request_headers,
+            "headers": request_headers,
         }
         if "wss://" in self.websocket_url:
             connect_kwargs["ssl"] = self.ssl_context
 
         logger.info("Establishing WebSocket connection")
-        return await websockets.connect(self.websocket_url, **connect_kwargs)
+        self.session = aiohttp.ClientSession()
+        try:
+            ws = await self.session.ws_connect(self.websocket_url, **connect_kwargs)
+            return ws
+        except aiohttp.ClientError as e:
+            error_msg = str(e)
+            error_data = {}
+
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_data = await e.response.json()
+                    if isinstance(error_data, dict):
+                        error_msg = error_data.get(
+                            "message", error_data.get("error", str(e))
+                        )
+                except (json.JSONDecodeError, AttributeError):
+                    try:
+                        error_msg = await e.response.text()
+                    except:
+                        pass
+
+            await self.session.close()
+            error = ConnectionError(error_msg)
+            if hasattr(e, "status"):
+                error.status = e.status
+            if error_data:
+                error.details = error_data
+            raise error
+        except Exception as e:
+            await self.session.close()
+            raise ConnectionError(str(e))
 
     async def send_config(self, ws: Any, config: dict) -> None:
         """Send configuration to WebSocket.
@@ -89,7 +119,7 @@ class WebSocketHandler(EventEmitter):
             ws: WebSocket connection
             config: Configuration dictionary
         """
-        await ws.send(json.dumps({"config": config}))
+        await ws.send_str(json.dumps({"config": config}))
 
     async def process_transcription_stream(
         self,
@@ -106,16 +136,24 @@ class WebSocketHandler(EventEmitter):
         complete_sentences = []
         while True:
             try:
-                if ws.closed:
+                if ws.closed or ws.exception():
                     await self.emit(LiveTranscriptionEvents.Close)
                     return complete_sentences
-                response = await asyncio.wait_for(ws.recv(), timeout=30.0)
+                msg = await asyncio.wait_for(ws.receive(), timeout=30.0)
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    response = msg.data
+                elif msg.type == aiohttp.WSMsgType.CLOSED:
+                    await self.emit(LiveTranscriptionEvents.Close)
+                    return complete_sentences
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    raise WebSocketError("WebSocket connection closed with error")
+                else:
+                    continue
                 response_data = json.loads(response)
 
                 if response_data.get("error"):
-                    e = response_data.get("error")
                     error = None
-                    error = BodhiAPIError(e)
+                    error = BodhiAPIError(response_data)
                     await self.emit(LiveTranscriptionEvents.Error, error)
                     # Cancel any ongoing tasks
                     for task in asyncio.all_tasks():
@@ -181,14 +219,18 @@ class WebSocketHandler(EventEmitter):
                     )
 
                 if socket_response.eos:
-                    if not ws.closed:
-                        try:
+                    try:
+                        if not ws.closed:
                             await ws.close()
+                            if hasattr(self, "session"):
+                                await self.session.close()
                             logger.info("WebSocket connection closed")
-                            await self.emit(LiveTranscriptionEvents.Close)
-                            return complete_sentences
-                        except websockets.exceptions.ConnectionClosedError:
-                            pass
+                        await self.emit(LiveTranscriptionEvents.Close)
+                        return complete_sentences
+                    except (aiohttp.ClientError, Exception) as e:
+                        logger.error(f"Error during WebSocket closure: {str(e)}")
+                        await self.emit(LiveTranscriptionEvents.Error, e)
+                        return complete_sentences
             except json.JSONDecodeError as e:
                 await self.emit(LiveTranscriptionEvents.Close)
                 await self.emit(
@@ -198,12 +240,21 @@ class WebSocketHandler(EventEmitter):
                 try:
                     if not ws.closed:
                         await ws.close()
+                        if hasattr(self, "session"):
+                            await self.session.close()
                         logger.error("WebSocket connection closed due to JSON error")
                 except Exception as close_error:
                     await self.emit(LiveTranscriptionEvents.Error, close_error)
                 raise InvalidJSONError("Received invalid JSON response")
-            except websockets.exceptions.ConnectionClosedError as e:
+            except aiohttp.ClientError as e:
                 await self.emit(LiveTranscriptionEvents.Error, e)
+                try:
+                    if not ws.closed:
+                        await ws.close()
+                        if hasattr(self, "session"):
+                            await self.session.close()
+                except Exception as close_error:
+                    logger.error(f"Error during WebSocket closure: {str(close_error)}")
                 await self.emit(LiveTranscriptionEvents.Close)
                 return complete_sentences
             except asyncio.TimeoutError:
@@ -211,8 +262,13 @@ class WebSocketHandler(EventEmitter):
                     LiveTranscriptionEvents.Error,
                     WebSocketTimeoutError("WebSocket connection timed out"),
                 )
-                if not ws.closed:
-                    await ws.close()
+                try:
+                    if not ws.closed:
+                        await ws.close()
+                        if hasattr(self, "session"):
+                            await self.session.close()
+                except Exception as close_error:
+                    logger.error(f"Error during WebSocket closure: {str(close_error)}")
                 await self.emit(LiveTranscriptionEvents.Close)
                 return complete_sentences
             except Exception as e:
@@ -220,8 +276,12 @@ class WebSocketHandler(EventEmitter):
                     LiveTranscriptionEvents.Error,
                     WebSocketError(f"An unexpected WebSocket error occurred: {e}"),
                 )
-                if not ws.closed:
-                    await ws.close()
+                try:
+                    if not ws.closed:
+                        await ws.close()
+                        if hasattr(self, "session"):
+                            await self.session.close()
+                except Exception as close_error:
+                    logger.error(f"Error during WebSocket closure: {str(close_error)}")
                 await self.emit(LiveTranscriptionEvents.Close)
                 raise WebSocketError(f"An unexpected WebSocket error occurred: {e}")
-                return complete_sentences

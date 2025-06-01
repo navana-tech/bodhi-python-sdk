@@ -21,6 +21,8 @@ from bodhi.utils.exceptions import (
 )
 from bodhi.events import LiveTranscriptionEvents
 from . import EOF_SIGNAL
+from bodhi.utils.error_utils import make_error_response
+import sys
 
 
 class TranscriptionHandler:
@@ -32,28 +34,52 @@ class TranscriptionHandler:
 
     async def _handle_api_error(self, e: Exception):
         """Handle API-related errors and emit appropriate events."""
-        error_msg = f"Failed to transcribe audio file: {str(e)}"
         error = None
-        if hasattr(e, "status_code"):
-            if e.status_code == 401:
-                error_msg = "Authentication failed: Invalid API Key or Customer ID."
-                error = AuthenticationError(error_msg)
-            elif e.status_code == 402:
-                error_msg = "Payment required: Please check your subscription."
-                error = PaymentRequiredError(error_msg)
-            elif e.status_code == 403:
-                error_msg = (
-                    "Forbidden: You do not have permission to access this resource."
-                )
-                error = ForbiddenError(error_msg)
-            else:
-                error_msg = f"Failed to start streaming session: {str(e)}"
-                error = ConnectionError(error_msg)
+        status_code = None
+        if hasattr(e, "status") and isinstance(e.status, int):
+            status_code = e.status
+        elif hasattr(e, "status_code"):
+            status_code = e.status_code
+        details = getattr(e, "details", None)
+        # Default error values
+        err_type = "unknown_error"
+        message = "Something went wrong"
+        code = status_code or 500
+        # Map specific status codes
+        if status_code == 401:
+            err_type = "authentication_error"
+            message = "Authentication Error"
+            error_response = make_error_response(
+                err_type, message, code, extra={"details": details} if details else None
+            )
+            error = AuthenticationError(error_response)
+        elif status_code == 402:
+            err_type = "insufficient_credits"
+            message = "Insufficient Credits"
+            error_response = make_error_response(
+                err_type, message, code, extra={"details": details} if details else None
+            )
+            error = PaymentRequiredError(error_response)
+        elif status_code == 403:
+            err_type = "forbidden"
+            message = "Forbidden"
+            error_response = make_error_response(
+                err_type, message, code, extra={"details": details} if details else None
+            )
+            error = ForbiddenError(error_response)
         else:
-            error_msg = f"Failed to start streaming session: {str(e)}"
-            error = ConnectionError(error_msg)
-        logger.error(error_msg)
+            err_type = "internal_server_error"
+            message = "Internal Server Error"
+            error_response = make_error_response(
+                err_type, message, code, extra={"details": details} if details else None
+            )
+            error = ConnectionError(error_response)
+        # Use server message if available
+        if details and isinstance(details, dict):
+            message = details.get("message", message)
+        logger.debug(f"API Error: {error_response}")
         await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
+        sys.exit(1)
 
     def _prepare_config(self, config: Optional[TranscriptionConfig] = None) -> dict:
         """Prepare configuration dictionary from TranscriptionConfig instance.
@@ -175,7 +201,7 @@ class TranscriptionHandler:
 
         try:
             if not self.ws.closed:
-                await self.ws.send(EOF_SIGNAL)
+                await self.ws.send_str(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
                 try:
                     result = await asyncio.gather(self.recv_task)

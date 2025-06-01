@@ -30,13 +30,13 @@ class AudioProcessor:
                 i = int(byte_rate * REALTIME_RESOLUTION)
                 chunk, data = data[:i], data[i:]
                 if not ws.closed:
-                    await ws.send(chunk)
+                    await ws.send_bytes(chunk)
                     logger.debug(f"Sent {len(chunk)} bytes of audio data")
                 audio_cursor += REALTIME_RESOLUTION
                 await asyncio.sleep(REALTIME_RESOLUTION)
 
             if not ws.closed:
-                await ws.send(EOF_SIGNAL)
+                await ws.send_str(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
         except Exception as e:
             logger.error(f"Error processing audio file: {str(e)}")
@@ -53,7 +53,7 @@ class AudioProcessor:
         try:
             data = stream.read()
             if not ws.closed:
-                await ws.send(data)
+                await ws.send_bytes(data)
                 logger.debug(f"Sent {len(data)} bytes of stream data")
 
         except Exception as e:
