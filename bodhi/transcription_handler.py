@@ -40,8 +40,6 @@ class TranscriptionHandler:
         status_code = None
         if hasattr(e, "status") and isinstance(e.status, int):
             status_code = e.status
-        elif hasattr(e, "status_code"):
-            status_code = e.status_code
         details = getattr(e, "details", None)
         # Default error values
         message = "Something went wrong"
