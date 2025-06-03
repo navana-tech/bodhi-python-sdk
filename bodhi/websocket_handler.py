@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional, Union
 
 import aiohttp
 
+from bodhi.utils.error_utils import make_error_response, BodhiErrors
+
 from .utils.logger import logger
 from .utils.exceptions import (
     BodhiAPIError,
@@ -102,7 +104,15 @@ class WebSocketHandler(EventEmitter):
                         pass
 
             await self.session.close()
-            error = ConnectionError(error_msg)
+            error_msg = make_error_response(
+                message=str(e),
+                code=(
+                    e.status
+                    if hasattr(e, "status")
+                    else BodhiErrors.InternalServerError.value
+                ),
+            )
+            error = ConnectionError(json.dumps(error_msg))
             if hasattr(e, "status"):
                 error.status = e.status
             if error_data:
@@ -110,7 +120,10 @@ class WebSocketHandler(EventEmitter):
             raise error
         except Exception as e:
             await self.session.close()
-            raise ConnectionError(str(e))
+            error_msg = make_error_response(
+                message=str(e), code=BodhiErrors.InternalServerError.value
+            )
+            raise ConnectionError(json.dumps(error_msg))
 
     async def send_config(self, ws: Any, config: dict) -> None:
         """Send configuration to WebSocket.
@@ -153,12 +166,14 @@ class WebSocketHandler(EventEmitter):
 
                 if response_data.get("error"):
                     error = None
-                    error = BodhiAPIError(response_data)
+                    error = BodhiAPIError(json.dumps(response_data))
                     await self.emit(LiveTranscriptionEvents.Error, error)
                     # Cancel any ongoing tasks
                     for task in asyncio.all_tasks():
                         if task != asyncio.current_task():
                             task.cancel()
+                    await ws.close()
+
                     return complete_sentences
 
                 socket_response = TranscriptionResponse(

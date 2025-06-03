@@ -12,6 +12,7 @@ from .utils.logger import logger
 from .transcription_config import TranscriptionConfig
 from .audio_processor import AudioProcessor
 from bodhi.utils.exceptions import (
+    AudioDownloadError,
     ConfigurationError,
     ConnectionError,
     StreamingError,
@@ -19,9 +20,10 @@ from bodhi.utils.exceptions import (
     PaymentRequiredError,
     ForbiddenError,
 )
+import json
 from bodhi.events import LiveTranscriptionEvents
 from . import EOF_SIGNAL
-from bodhi.utils.error_utils import make_error_response
+from bodhi.utils.error_utils import make_error_response, BodhiErrors
 import sys
 
 
@@ -42,38 +44,41 @@ class TranscriptionHandler:
             status_code = e.status_code
         details = getattr(e, "details", None)
         # Default error values
-        err_type = "unknown_error"
         message = "Something went wrong"
-        code = status_code or 500
         # Map specific status codes
-        if status_code == 401:
-            err_type = "authentication_error"
+        if status_code == BodhiErrors.Unauthorized:
             message = "Authentication Error"
             error_response = make_error_response(
-                err_type, message, code, extra={"details": details} if details else None
+                message=message,
+                code=status_code,
+                extra={"details": details} if details else None,
             )
-            error = AuthenticationError(error_response)
-        elif status_code == 402:
-            err_type = "insufficient_credits"
+            error = AuthenticationError(json.dumps(error_response))
+        elif status_code == BodhiErrors.InsufficientCredit:
             message = "Insufficient Credits"
             error_response = make_error_response(
-                err_type, message, code, extra={"details": details} if details else None
+                message,
+                status_code,
+                extra={"details": details} if details else None,
             )
-            error = PaymentRequiredError(error_response)
-        elif status_code == 403:
-            err_type = "forbidden"
+            error = PaymentRequiredError(json.dumps(error_response))
+        elif status_code == BodhiErrors.InactiveCustomer:
             message = "Forbidden"
             error_response = make_error_response(
-                err_type, message, code, extra={"details": details} if details else None
+                message,
+                status_code,
+                extra={"details": details} if details else None,
             )
-            error = ForbiddenError(error_response)
+            error = ForbiddenError(json.dumps(error_response))
         else:
-            err_type = "internal_server_error"
             message = "Internal Server Error"
+            status_code = status_code or BodhiErrors.InternalServerError
             error_response = make_error_response(
-                err_type, message, code, extra={"details": details} if details else None
+                message=message,
+                code=status_code,
+                extra={"details": details} if details else None,
             )
-            error = ConnectionError(error_response)
+            error = ConnectionError(json.dumps(error_response))
         # Use server message if available
         if details and isinstance(details, dict):
             message = details.get("message", message)
@@ -165,11 +170,14 @@ class TranscriptionHandler:
             StreamingError: If streaming session is not started or connection is closed
         """
         if not self.ws or self.ws.closed:
-            error_msg = "WebSocket connection is not established or closed"
+            error_msg = make_error_response(
+                message="WebSocket connection is not established or closed",
+                code=BodhiErrors.ClientClosed.value,
+            )
             logger.error(error_msg)
-            error = StreamingError(error_msg)
+            error = StreamingError(json.dumps(error_msg))
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return
+            return []
 
         try:
             from io import BytesIO
@@ -181,7 +189,7 @@ class TranscriptionHandler:
             logger.error(error_msg)
             error = StreamingError(error_msg)
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return
+            return []
 
     async def finish_streaming(self) -> List[str]:
         """Finish streaming session and get transcription results.
@@ -193,9 +201,12 @@ class TranscriptionHandler:
             ConnectionError: If streaming session is not started
         """
         if not self.ws:
-            error_msg = "No active streaming session"
+            error_msg = make_error_response(
+                message="No active streaming session",
+                code=BodhiErrors.BadRequest.value,
+            )
             logger.error(error_msg)
-            error = ConnectionError(error_msg)
+            error = ConnectionError(json.dumps(error_msg))
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
             return []
 
@@ -209,16 +220,23 @@ class TranscriptionHandler:
                     logger.info("Finished streaming session")
                     return result[0]  # Extract result from gather tuple
                 except asyncio.CancelledError:
-                    error = ConnectionError("Transcription tasks cancelled")
+                    error_response = make_error_response(
+                        message="Transcription tasks were cancelled",
+                        code=BodhiErrors.ClientClosed.value,
+                    )
+                    error = ConnectionError(json.dumps(error_response))
                     await self.websocket_handler.emit(
                         LiveTranscriptionEvents.Error, error
                     )
                     return []
             return []
         except Exception as e:
-            error_msg = f"Failed to finish streaming: {str(e)}"
+            error_msg = make_error_response(
+                message=f"Failed to finish streaming: {str(e)}",
+                code=BodhiErrors.GatewayDown.value,
+            )
             logger.error(error_msg)
-            error = ConnectionError(error_msg)
+            error = ConnectionError(json.dumps(error_msg))
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
             return []
         finally:
@@ -396,14 +414,21 @@ class TranscriptionHandler:
                     1
                 ]  # Return complete_sentences from process_transcription_stream
             except asyncio.CancelledError:
-                error = ConnectionError("Transcription tasks cancelled")
+                error_response = make_error_response(
+                    message="Transcription tasks were cancelled",
+                    code=BodhiErrors.ClientClosed.value,
+                )
+                error = ConnectionError(json.dumps(error_response))
                 await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
                 return []
 
         except requests.exceptions.RequestException as e:
             error_msg = f"Failed to download audio from URL: {str(e)}"
             logger.error(error_msg)
-            error = AudioDownloadError(error_msg)
+            error_response = make_error_response(
+                message=error_msg, code=BodhiErrors.BadRequest.value
+            )
+            error = AudioDownloadError(json.loads(error_response))
             await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
             return []
         except Exception as e:
