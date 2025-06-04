@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0.post1] - 2025-06-05
+
+### Changed
+
+- Refactored internal exception handling logic to improve consistency and maintainability.
+- No changes to the public API or user-facing behavior.
+
 ## [1.0.0] - 2025-06-04
 
 ### Changed
