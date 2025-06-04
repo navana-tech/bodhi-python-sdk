@@ -2,8 +2,10 @@
 """Bodhi Streaming Speech Recognition Client"""
 
 
+import json
 import os
 from bodhi.transcription_handler import TranscriptionHandler
+from bodhi.utils.error_utils import BodhiErrors, make_error_response
 from bodhi.websocket_handler import WebSocketHandler
 from typing import Optional, Callable, List
 from .transcription_config import TranscriptionConfig
@@ -31,20 +33,30 @@ class BodhiClient:
             customer_id: Customer ID for authentication
             uri: WebSocket URI for the service
         """
-        self.api_key = api_key or os.environ.get("API_KEY")
+        self.api_key = api_key or os.environ.get("BODHI_API_KEY")
         if not self.api_key:
             logger.error("API key not provided and not found in environment")
-            raise ConfigurationError("API key is required")
+            error_msg = make_error_response(
+                message="API key is required", code=BodhiErrors.BadRequest.value
+            )
+            raise ConfigurationError(json.dumps(error_msg))
 
-        self.customer_id = customer_id or os.environ.get("CUSTOMER_ID")
+        self.customer_id = customer_id or os.environ.get("BODHI_CUSTOMER_ID")
         if not self.customer_id:
             logger.error("Customer ID not provided and not found in environment")
-            raise ConfigurationError("Customer ID is required")
+            error_msg = make_error_response(
+                message="Customer ID is required", code=BodhiErrors.BadRequest.value
+            )
+            raise ConfigurationError(json.dumps(error_msg))
 
         try:
             uuid.UUID(self.customer_id)
         except ValueError:
-            raise ConfigurationError("Customer ID must be a valid UUID.")
+            error_msg = make_error_response(
+                message="Customer ID must be a valid UUID.",
+                code=BodhiErrors.BadRequest.value,
+            )
+            raise ConfigurationError(json.dumps(error_msg))
 
         self.websocket_url = uri or "wss://bodhi.navana.ai"
         self.websocket_handler = WebSocketHandler(
@@ -63,7 +75,6 @@ class BodhiClient:
         Raises:
             ConnectionError: If configuration is incorrect or session cannot be started
         """
-        # Pass no callbacks to transcription handler
         return await self.transcription_handler.start_streaming_session(config)
 
     async def send_audio_stream(self, audio_data: bytes) -> None:

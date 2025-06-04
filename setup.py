@@ -6,7 +6,7 @@ setup(
     packages=["bodhi", "bodhi.utils"],
     install_requires=[
         "requests",
-        "websockets<=12.0",
+        "aiohttp",
     ],
     python_requires=">=3.7",
     author="Navana",

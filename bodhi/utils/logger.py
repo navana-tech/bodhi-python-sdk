@@ -16,6 +16,7 @@ def setup_logger(name: str = "bodhi", level: Optional[int] = None) -> logging.Lo
         logging.Logger: Configured logger instance
     """
     logger = logging.getLogger(name)
+    logger.propagate = False  # Prevent log messages from being propagated
 
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
