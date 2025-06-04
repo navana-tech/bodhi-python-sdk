@@ -39,8 +39,7 @@ class AudioProcessor:
                 await ws.send_str(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
         except Exception as e:
-            logger.error(f"Error processing audio file: {str(e)}")
-            raise
+            return e
 
     @staticmethod
     async def process_stream(stream: BinaryIO, ws: Any) -> None:
@@ -57,5 +56,4 @@ class AudioProcessor:
                 logger.debug(f"Sent {len(data)} bytes of stream data")
 
         except Exception as e:
-            logger.error(f"Error processing stream: {str(e)}")
-            raise
+            return e

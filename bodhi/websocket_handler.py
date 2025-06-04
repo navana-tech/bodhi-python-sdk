@@ -23,6 +23,7 @@ from .events import LiveTranscriptionEvents
 class EventEmitter:
     def __init__(self):
         self._listeners = {}
+        self._warned_events = set()
 
     def on(self, event, listener):
         if event not in self._listeners:
@@ -34,7 +35,7 @@ class EventEmitter:
             self._listeners[event].remove(listener)
 
     async def emit(self, event, *args, **kwargs):
-        if event in self._listeners:
+        if event in self._listeners and self._listeners[event]:
             for listener in self._listeners[event]:
                 try:
                     if asyncio.iscoroutinefunction(listener):
@@ -43,6 +44,22 @@ class EventEmitter:
                         listener(*args, **kwargs)
                 except Exception as e:
                     logger.error(f"Error in event listener for {event}: {e}")
+        else:
+            if (
+                event == LiveTranscriptionEvents.Transcript
+                and event not in self._warned_events
+            ):
+                logger.warning(
+                    "\n"
+                    + "*" * 80
+                    + "\n"
+                    + "⚠️  WARNING: NO LISTENER REGISTERED FOR 'TRANSCRIPT' EVENT! ⚠️\n"
+                    ">> This may result in missed transcription outputs.\n"
+                    ">> Make sure to register a listener using `.on(LiveTranscriptionEvents.Transcript, callback)`.\n"
+                    + "*" * 80
+                    + "\n"
+                )
+                self._warned_events.add(event)
 
 
 class WebSocketHandler(EventEmitter):
@@ -137,44 +154,46 @@ class WebSocketHandler(EventEmitter):
     async def process_transcription_stream(
         self,
         ws: Any,
-    ) -> list:
+    ) -> None:
         """Process transcription stream from WebSocket.
 
         Args:
             ws: WebSocket connection
-
-        Returns:
-            List of complete transcribed sentences
         """
-        complete_sentences = []
         while True:
             try:
                 if ws.closed or ws.exception():
                     await self.emit(LiveTranscriptionEvents.Close)
-                    return complete_sentences
                 msg = await asyncio.wait_for(ws.receive(), timeout=30.0)
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     response = msg.data
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     await self.emit(LiveTranscriptionEvents.Close)
-                    return complete_sentences
+                    return
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    raise WebSocketError("WebSocket connection closed with error")
+                    error = make_error_response(
+                        message="WebSocket connection closed with error",
+                        code=BodhiErrors.ClientClosed.value,
+                    )
+                    await self.emit(
+                        LiveTranscriptionEvents.Error,
+                        WebSocketError(json.dumps(error)),
+                    )
+                    raise error
                 else:
                     continue
                 response_data = json.loads(response)
 
                 if response_data.get("error"):
-                    error = None
                     error = BodhiAPIError(json.dumps(response_data))
                     await self.emit(LiveTranscriptionEvents.Error, error)
+
                     # Cancel any ongoing tasks
                     for task in asyncio.all_tasks():
                         if task != asyncio.current_task():
                             task.cancel()
                     await ws.close()
-
-                    return complete_sentences
+                    raise error
 
                 socket_response = TranscriptionResponse(
                     call_id=response_data["call_id"],
@@ -215,7 +234,6 @@ class WebSocketHandler(EventEmitter):
                 await self.emit(LiveTranscriptionEvents.Transcript, socket_response)
 
                 if socket_response.type == "complete":
-                    complete_sentences.append(socket_response.text)
                     end_time = round(
                         socket_response.segment_meta.start_time
                         + (
@@ -241,16 +259,26 @@ class WebSocketHandler(EventEmitter):
                                 await self.session.close()
                             logger.info("WebSocket connection closed")
                         await self.emit(LiveTranscriptionEvents.Close)
-                        return complete_sentences
+                        return
                     except (aiohttp.ClientError, Exception) as e:
                         logger.error(f"Error during WebSocket closure: {str(e)}")
-                        await self.emit(LiveTranscriptionEvents.Error, e)
-                        return complete_sentences
+                        error_msg = make_error_response(
+                            message=str(e),
+                            code=BodhiErrors.InternalServerError.value,
+                        )
+                        await self.emit(
+                            LiveTranscriptionEvents.Error,
+                            WebSocketError(json.dumps(error_msg)),
+                        )
             except json.JSONDecodeError as e:
                 await self.emit(LiveTranscriptionEvents.Close)
+                error_msg = make_error_response(
+                    message="Received invalid JSON response",
+                    code=BodhiErrors.InternalServerError.value,
+                )
                 await self.emit(
                     LiveTranscriptionEvents.Error,
-                    InvalidJSONError("Received invalid JSON response"),
+                    InvalidJSONError(json.dumps(error_msg)),
                 )
                 try:
                     if not ws.closed:
@@ -259,23 +287,26 @@ class WebSocketHandler(EventEmitter):
                             await self.session.close()
                         logger.error("WebSocket connection closed due to JSON error")
                 except Exception as close_error:
-                    await self.emit(LiveTranscriptionEvents.Error, close_error)
-                raise InvalidJSONError("Received invalid JSON response")
+                    error_msg = make_error_response(
+                        message=str(close_error),
+                        code=BodhiErrors.ClientClosed.value,
+                    )
+                    await self.emit(
+                        LiveTranscriptionEvents.Error,
+                        WebSocketError(json.dumps(error_msg)),
+                    )
+                error_msg = make_error_response(
+                    message="Received invalid JSON response",
+                    code=BodhiErrors.InternalServerError.value,
+                )
+                raise InvalidJSONError(json.dumps(error_msg))
             except aiohttp.ClientError as e:
-                await self.emit(LiveTranscriptionEvents.Error, e)
-                try:
-                    if not ws.closed:
-                        await ws.close()
-                        if hasattr(self, "session"):
-                            await self.session.close()
-                except Exception as close_error:
-                    logger.error(f"Error during WebSocket closure: {str(close_error)}")
-                await self.emit(LiveTranscriptionEvents.Close)
-                return complete_sentences
-            except asyncio.TimeoutError:
+                error_msg = make_error_response(
+                    message=str(e),
+                    code=BodhiErrors.InternalServerError.value,
+                )
                 await self.emit(
-                    LiveTranscriptionEvents.Error,
-                    WebSocketTimeoutError("WebSocket connection timed out"),
+                    LiveTranscriptionEvents.Error, BodhiAPIError(json.dumps(error_msg))
                 )
                 try:
                     if not ws.closed:
@@ -285,11 +316,33 @@ class WebSocketHandler(EventEmitter):
                 except Exception as close_error:
                     logger.error(f"Error during WebSocket closure: {str(close_error)}")
                 await self.emit(LiveTranscriptionEvents.Close)
-                return complete_sentences
-            except Exception as e:
+                return
+            except asyncio.TimeoutError:
+                error_msg = make_error_response(
+                    message="WebSocket connection timed out",
+                    code=BodhiErrors.GatewayTimeout.value,
+                )
                 await self.emit(
                     LiveTranscriptionEvents.Error,
-                    WebSocketError(f"An unexpected WebSocket error occurred: {e}"),
+                    WebSocketTimeoutError(json.dumps(error_msg)),
+                )
+                try:
+                    if not ws.closed:
+                        await ws.close()
+                        if hasattr(self, "session"):
+                            await self.session.close()
+                except Exception as close_error:
+                    logger.error(f"Error during WebSocket closure: {str(close_error)}")
+                await self.emit(LiveTranscriptionEvents.Close)
+                return
+            except Exception as e:
+                error_msg = make_error_response(
+                    message=str(e),
+                    code=BodhiErrors.InternalServerError.value,
+                )
+                await self.emit(
+                    LiveTranscriptionEvents.Error,
+                    WebSocketError(json.dumps(error_msg)),
                 )
                 try:
                     if not ws.closed:

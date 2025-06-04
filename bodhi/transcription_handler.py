@@ -1,6 +1,7 @@
 # transcription_handler.py
 """Transcription Handler Module for Bodhi Client"""
 
+from csv import Error
 import os
 import wave
 import asyncio
@@ -8,17 +9,24 @@ from typing import Any, Callable, List, Optional
 import uuid
 import requests
 import tempfile
+
+
 from .utils.logger import logger
 from .transcription_config import TranscriptionConfig
 from .audio_processor import AudioProcessor
 from bodhi.utils.exceptions import (
     AudioDownloadError,
+    AuthenticationError,
+    BodhiAPIError,
     ConfigurationError,
     ConnectionError,
-    StreamingError,
-    AuthenticationError,
-    PaymentRequiredError,
+    EmptyAudioError,
+    FileNotFoundError,
     ForbiddenError,
+    InvalidAudioFormatError,
+    InvalidURLError,
+    PaymentRequiredError,
+    StreamingError,
 )
 import json
 from bodhi.events import LiveTranscriptionEvents
@@ -41,8 +49,6 @@ class TranscriptionHandler:
         if hasattr(e, "status") and isinstance(e.status, int):
             status_code = e.status
         details = getattr(e, "details", None)
-        # Default error values
-        message = "Something went wrong"
         # Map specific status codes
         if status_code == BodhiErrors.Unauthorized:
             message = "Authentication Error"
@@ -82,7 +88,7 @@ class TranscriptionHandler:
             message = details.get("message", message)
         logger.debug(f"API Error: {error_response}")
         await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-        sys.exit(1)
+        raise error
 
     def _prepare_config(self, config: Optional[TranscriptionConfig] = None) -> dict:
         """Prepare configuration dictionary from TranscriptionConfig instance.
@@ -97,19 +103,25 @@ class TranscriptionHandler:
             ConfigurationError: If configuration is invalid
         """
         if config is None:
-            error_msg = "transcription config must be defined."
-            raise ConfigurationError(error_msg)
+            error_msg = make_error_response(
+                message="transcription config must be defined",
+                code=BodhiErrors.BadRequest.value,
+            )
+            raise ConfigurationError(json.dumps(error_msg))
 
         if not hasattr(config, "model") or config.model is None:
-            error_msg = (
-                "model is a required argument - transcription config must be defined."
+            error_msg = make_error_response(
+                message="model is a required argument - transcription config must be defined.",
+                code=BodhiErrors.BadRequest.value,
             )
-            raise ConfigurationError(error_msg)
+            raise ConfigurationError(json.dumps(error_msg))
 
         if not hasattr(config, "sample_rate") or config.sample_rate is None:
-            error_msg = "sample_rate is a required argument - transcription config must be defined."
-            logger.error(error_msg)
-            raise ConfigurationError(error_msg)
+            error_msg = make_error_response(
+                message="sample_rate is a required argument - transcription config must be defined.",
+                code=BodhiErrors.BadRequest.value,
+            )
+            raise ConfigurationError(json.dumps(error_msg))
 
         self.config = config
         config_instance = TranscriptionConfig(
@@ -141,24 +153,22 @@ class TranscriptionHandler:
         Raises:
             ConnectionError: If configuration is incorrect
         """
-        try:
-            final_config = self._prepare_config(config)
+        final_config = self._prepare_config(config)
+        self.ws = await self.websocket_handler.connect()
 
-            self.ws = await self.websocket_handler.connect()
+        try:
             await self.websocket_handler.send_config(self.ws, final_config)
-            # Pass the callbacks from BodhiClient to WebSocketHandler
             self.recv_task = asyncio.create_task(
                 self.websocket_handler.process_transcription_stream(
                     self.ws,
                 )
             )
             logger.info("Started streaming session and processing stream")
-
         except Exception as e:
             await self._handle_api_error(e)
             return
 
-    async def stream_audio(self, audio_data: bytes) -> List[str]:
+    async def stream_audio(self, audio_data: bytes) -> None:
         """Stream audio data to the WebSocket connection and process results.
 
         Args:
@@ -173,9 +183,9 @@ class TranscriptionHandler:
                 code=BodhiErrors.ClientClosed.value,
             )
             logger.error(error_msg)
-            error = StreamingError(json.dumps(error_msg))
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return []
+            await self.websocket_handler.emit(
+                LiveTranscriptionEvents.Error, StreamingError(json.dumps(error_msg))
+            )
 
         try:
             from io import BytesIO
@@ -183,13 +193,17 @@ class TranscriptionHandler:
             stream = BytesIO(audio_data)
             await AudioProcessor.process_stream(stream, self.ws)
         except Exception as e:
-            error_msg = f"Failed to stream audio data: {str(e)}"
+            error_msg = make_error_response(
+                message=f"Failed to stream audio data: {str(e)}",
+                code=BodhiErrors.GatewayDown.value,
+            )
             logger.error(error_msg)
-            error = StreamingError(error_msg)
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return []
+            await self.websocket_handler.emit(
+                LiveTranscriptionEvents.Error, StreamingError(json.dumps(error_msg))
+            )
+            return
 
-    async def finish_streaming(self) -> List[str]:
+    async def finish_streaming(self) -> None:
         """Finish streaming session and get transcription results.
 
         Returns:
@@ -204,39 +218,40 @@ class TranscriptionHandler:
                 code=BodhiErrors.BadRequest.value,
             )
             logger.error(error_msg)
-            error = ConnectionError(json.dumps(error_msg))
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return []
+            await self.websocket_handler.emit(
+                LiveTranscriptionEvents.Error, ConnectionError(json.dumps(error_msg))
+            )
 
         try:
             if not self.ws.closed:
                 await self.ws.send_str(EOF_SIGNAL)
                 logger.debug("Sent EOF signal")
                 try:
-                    result = await asyncio.gather(self.recv_task)
+                    await asyncio.gather(self.recv_task)
                     await self.ws.close()
                     logger.info("Finished streaming session")
-                    return result[0]  # Extract result from gather tuple
+                    return
                 except asyncio.CancelledError:
                     error_response = make_error_response(
                         message="Transcription tasks were cancelled",
                         code=BodhiErrors.ClientClosed.value,
                     )
-                    error = ConnectionError(json.dumps(error_response))
                     await self.websocket_handler.emit(
-                        LiveTranscriptionEvents.Error, error
+                        LiveTranscriptionEvents.Error,
+                        ConnectionError(json.dumps(error_response)),
                     )
-                    return []
-            return []
+                    return
+            return
         except Exception as e:
             error_msg = make_error_response(
                 message=f"Failed to finish streaming: {str(e)}",
                 code=BodhiErrors.GatewayDown.value,
             )
             logger.error(error_msg)
-            error = ConnectionError(json.dumps(error_msg))
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return []
+            await self.websocket_handler.emit(
+                LiveTranscriptionEvents.Error, ConnectionError(json.dumps(error_msg))
+            )
+
         finally:
             self.ws = None
 
@@ -244,16 +259,12 @@ class TranscriptionHandler:
         self,
         audio_url: str,
         config: Optional[TranscriptionConfig] = None,
-        on_transcription: Optional[Callable[[Any], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
     ) -> List[str]:
         """Transcribe audio from URL.
 
         Args:
             audio_url: URL of audio file
             config: Configuration object
-            on_transcription: Callback for transcription results
-            on_error: Callback for error handling
 
         Returns:
             List of complete transcribed sentences
@@ -266,24 +277,18 @@ class TranscriptionHandler:
             source=audio_url,
             is_url=True,
             config=config,
-            on_transcription=on_transcription,
-            on_error=on_error,
         )
 
     async def transcribe_local_file(
         self,
         audio_file: str,
         config: Optional[TranscriptionConfig] = None,
-        on_transcription: Optional[Callable[[Any], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
     ) -> List[str]:
         """Transcribe local audio file.
 
         Args:
             audio_file: Path to audio file
             config: Configuration object
-            on_transcription: Callback for transcription results
-            on_error: Callback for error handling
 
         Returns:
             List of complete transcribed sentences
@@ -296,8 +301,6 @@ class TranscriptionHandler:
             source=audio_file,
             is_url=False,
             config=config,
-            on_transcription=on_transcription,
-            on_error=on_error,
         )
 
     async def _handle_audio_source(
@@ -305,9 +308,7 @@ class TranscriptionHandler:
         source: Any,
         is_url: bool,
         config: Optional[TranscriptionConfig] = None,
-        on_transcription: Optional[Callable[[Any], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
-    ) -> List[str]:
+    ) -> None:
         """Handle audio source (URL or local file) for transcription.
 
         Args:
@@ -328,16 +329,18 @@ class TranscriptionHandler:
             if is_url:
                 # Validate URL format
                 if not source.startswith(("http://", "https://")):
-                    error_msg = f"Invalid URL format: {source}"
-                    logger.error(error_msg)
-                    error = InvalidURLError(error_msg)
-                    await self.websocket_handler.emit(
-                        LiveTranscriptionEvents.Error, error
+                    error_msg = make_error_response(
+                        message=f"Invalid URL format: {source}",
+                        code=BodhiErrors.BadRequest.value,
                     )
-                    return []
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error,
+                        InvalidURLError(json.dumps(error_msg)),
+                    )
+                    return
 
                 temp_audio = tempfile.NamedTemporaryFile(delete=True)
-                logger.debug(f"Downloading audio from URL to temporary file")
+                logger.debug("Downloading audio from URL to temporary file")
 
                 # Set timeout for the request
                 response = requests.get(source, stream=True, timeout=30)
@@ -355,38 +358,44 @@ class TranscriptionHandler:
 
                 # Verify downloaded file is not empty
                 if total_size == 0:
-                    error_msg = "Downloaded audio file is empty"
-                    logger.error(error_msg)
-                    error = EmptyAudioError(error_msg)
-                    await self.websocket_handler.emit(
-                        LiveTranscriptionEvents.Error, error
+                    error_msg = make_error_response(
+                        message="Downloaded audio file is empty",
+                        code=BodhiErrors.BadRequest.value,
                     )
-                    return []
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error,
+                        AudioDownloadError(json.dumps(error_msg)),
+                    )
+                    return
 
                 source = temp_audio.name
             else:
                 # Validate local file exists
                 if not os.path.exists(source):
-                    error_msg = f"Audio file not found: {source}"
-                    logger.error(error_msg)
-                    error = FileNotFoundError(error_msg)
-                    await self.websocket_handler.emit(
-                        LiveTranscriptionEvents.Error, error
+                    error_msg = make_error_response(
+                        message=f"Audio file not found: {source}",
+                        code=BodhiErrors.BadRequest.value,
                     )
-                    return []
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error,
+                        FileNotFoundError(json.dumps(error_msg)),
+                    )
+                    return
 
             # Validate file format
             logger.debug(f"Validating audio file format: {source}")
             with open(source, "rb") as f:
                 header = f.read(4)
                 if header != b"RIFF":
-                    error_msg = f"Invalid audio file format. Expected WAV file, got file with header: {header}"
-                    logger.error(error_msg)
-                    error = InvalidAudioFormatError(error_msg)
-                    await self.websocket_handler.emit(
-                        LiveTranscriptionEvents.Error, error
+                    error_msg = make_error_response(
+                        message=f"Invalid audio file format. Expected WAV file, got file with header: {header}",
+                        code=BodhiErrors.BadRequest.value,
                     )
-                    return []
+                    await self.websocket_handler.emit(
+                        LiveTranscriptionEvents.Error,
+                        InvalidAudioFormatError(json.dumps(error_msg)),
+                    )
+                    return
 
             wf = wave.open(source, "rb")
             (channels, sample_width, sample_rate, num_samples, _, _) = wf.getparams()
@@ -406,19 +415,18 @@ class TranscriptionHandler:
             )
 
             try:
-                result = await asyncio.gather(send_task, recv_task)
-                logger.info("Transcription completed successfully")
-                return result[
-                    1
-                ]  # Return complete_sentences from process_transcription_stream
+                await asyncio.gather(send_task, recv_task)
+                logger.debug("Transcription completed successfully")
             except asyncio.CancelledError:
                 error_response = make_error_response(
                     message="Transcription tasks were cancelled",
                     code=BodhiErrors.ClientClosed.value,
                 )
-                error = ConnectionError(json.dumps(error_response))
-                await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-                return []
+                await self.websocket_handler.emit(
+                    LiveTranscriptionEvents.Error,
+                    ConnectionError(json.dumps(error_response)),
+                )
+                return
 
         except requests.exceptions.RequestException as e:
             error_msg = f"Failed to download audio from URL: {str(e)}"
@@ -426,14 +434,15 @@ class TranscriptionHandler:
             error_response = make_error_response(
                 message=error_msg, code=BodhiErrors.BadRequest.value
             )
-            error = AudioDownloadError(json.loads(error_response))
-            await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
-            return []
+
+            await self.websocket_handler.emit(
+                LiveTranscriptionEvents.Error,
+                AudioDownloadError(json.loads(error_response)),
+            )
+            return
         except Exception as e:
-            error_msg = f"Failed to transcribe audio file: {str(e)}"
-            error = None
             await self._handle_api_error(e)
-            return []
+            return
         finally:
             if temp_audio:
                 temp_audio.close()
