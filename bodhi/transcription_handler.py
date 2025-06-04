@@ -171,9 +171,9 @@ class TranscriptionHandler:
         """
         final_config = self._prepare_config(config)
         self._validate_event_bindings()  # Validate if listener is registered
-        self.ws = await self.websocket_handler.connect()
 
         try:
+            self.ws = await self.websocket_handler.connect()
             await self.websocket_handler.send_config(self.ws, final_config)
             self.recv_task = asyncio.create_task(
                 self.websocket_handler.process_transcription_stream(

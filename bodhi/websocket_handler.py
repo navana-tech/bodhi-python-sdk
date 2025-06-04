@@ -86,44 +86,9 @@ class WebSocketHandler(EventEmitter):
         try:
             ws = await self.session.ws_connect(self.websocket_url, **connect_kwargs)
             return ws
-        except aiohttp.ClientError as e:
-            error_msg = str(e)
-            error_data = {}
-
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_data = await e.response.json()
-                    if isinstance(error_data, dict):
-                        error_msg = error_data.get(
-                            "message", error_data.get("error", str(e))
-                        )
-                except (json.JSONDecodeError, AttributeError):
-                    try:
-                        error_msg = await e.response.text()
-                    except:
-                        pass
-
-            await self.session.close()
-            error_msg = make_error_response(
-                message=str(e),
-                code=(
-                    e.status
-                    if hasattr(e, "status")
-                    else BodhiErrors.InternalServerError.value
-                ),
-            )
-            error = ConnectionError(json.dumps(error_msg))
-            if hasattr(e, "status"):
-                error.status = e.status
-            if error_data:
-                error.details = error_data
-            raise error
         except Exception as e:
-            await self.session.close()
-            error_msg = make_error_response(
-                message=str(e), code=BodhiErrors.InternalServerError.value
-            )
-            raise ConnectionError(json.dumps(error_msg))
+            logger.error(f"Failed to connect to WebSocket: {str(e)}")
+            raise e
 
     async def send_config(self, ws: Any, config: dict) -> None:
         """Send configuration to WebSocket.
@@ -319,14 +284,6 @@ class WebSocketHandler(EventEmitter):
                 await self.emit(LiveTranscriptionEvents.Close)
                 return
             except Exception as e:
-                error_msg = make_error_response(
-                    message=str(e),
-                    code=BodhiErrors.InternalServerError.value,
-                )
-                await self.emit(
-                    LiveTranscriptionEvents.Error,
-                    WebSocketError(json.dumps(error_msg)),
-                )
                 try:
                     if not ws.closed:
                         await ws.close()
@@ -335,4 +292,3 @@ class WebSocketHandler(EventEmitter):
                 except Exception as close_error:
                     logger.error(f"Error during WebSocket closure: {str(close_error)}")
                 await self.emit(LiveTranscriptionEvents.Close)
-                raise WebSocketError(f"An unexpected WebSocket error occurred: {e}")
