@@ -90,6 +90,22 @@ class TranscriptionHandler:
         await self.websocket_handler.emit(LiveTranscriptionEvents.Error, error)
         raise error
 
+    def _validate_event_bindings(self) -> None:
+        logger.info("Validating event bindings...")
+
+        # Check if transcript listener is registered
+        if LiveTranscriptionEvents.Transcript not in self.websocket_handler._listeners:
+            logger.warning(
+                "\n"
+                + "*" * 80
+                + "\n"
+                + "⚠️  WARNING: NO LISTENER REGISTERED FOR 'TRANSCRIPT' EVENT! ⚠️\n"
+                + ">> This may result in missed transcription outputs.\n"
+                + ">> Make sure to register a listener using `.on(LiveTranscriptionEvents.Transcript, callback)`.\n"
+                + "*" * 80
+                + "\n"
+            )
+
     def _prepare_config(self, config: Optional[TranscriptionConfig] = None) -> dict:
         """Prepare configuration dictionary from TranscriptionConfig instance.
 
@@ -154,6 +170,7 @@ class TranscriptionHandler:
             ConnectionError: If configuration is incorrect
         """
         final_config = self._prepare_config(config)
+        self._validate_event_bindings()  # Validate if listener is registered
         self.ws = await self.websocket_handler.connect()
 
         try:
@@ -405,6 +422,7 @@ class TranscriptionHandler:
 
             config.sample_rate = sample_rate
             final_config = self._prepare_config(config)
+            self._validate_event_bindings()  # Validate if listener is registered
 
             ws = await self.websocket_handler.connect()
             await self.websocket_handler.send_config(ws, final_config)

@@ -43,17 +43,12 @@ class AudioProcessor:
 
     @staticmethod
     async def process_stream(stream: BinaryIO, ws: Any) -> None:
-        """Process and stream generic binary stream data.
-
-        Args:
-            stream: Binary input stream
-            ws: WebSocket connection
-        """
+        """Process and stream generic binary stream data."""
         try:
             data = stream.read()
             if not ws.closed:
                 await ws.send_bytes(data)
                 logger.debug(f"Sent {len(data)} bytes of stream data")
-
         except Exception as e:
-            return e
+            logger.exception("Error during stream processing")
+            raise e

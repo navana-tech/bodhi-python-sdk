@@ -23,43 +23,26 @@ from .events import LiveTranscriptionEvents
 class EventEmitter:
     def __init__(self):
         self._listeners = {}
-        self._warned_events = set()
 
     def on(self, event, listener):
-        if event not in self._listeners:
-            self._listeners[event] = []
-        self._listeners[event].append(listener)
+        # Allow only one listener per event — replace if exists
+        self._listeners[event] = listener
 
-    def off(self, event, listener):
-        if event in self._listeners and listener in self._listeners[event]:
-            self._listeners[event].remove(listener)
+    def off(self, event):
+        # Remove the listener for the event
+        if event in self._listeners:
+            del self._listeners[event]
 
     async def emit(self, event, *args, **kwargs):
-        if event in self._listeners and self._listeners[event]:
-            for listener in self._listeners[event]:
-                try:
-                    if asyncio.iscoroutinefunction(listener):
-                        await listener(*args, **kwargs)
-                    else:
-                        listener(*args, **kwargs)
-                except Exception as e:
-                    logger.error(f"Error in event listener for {event}: {e}")
-        else:
-            if (
-                event == LiveTranscriptionEvents.Transcript
-                and event not in self._warned_events
-            ):
-                logger.warning(
-                    "\n"
-                    + "*" * 80
-                    + "\n"
-                    + "⚠️  WARNING: NO LISTENER REGISTERED FOR 'TRANSCRIPT' EVENT! ⚠️\n"
-                    ">> This may result in missed transcription outputs.\n"
-                    ">> Make sure to register a listener using `.on(LiveTranscriptionEvents.Transcript, callback)`.\n"
-                    + "*" * 80
-                    + "\n"
-                )
-                self._warned_events.add(event)
+        if event in self._listeners:
+            listener = self._listeners[event]
+            try:
+                if asyncio.iscoroutinefunction(listener):
+                    await listener(*args, **kwargs)
+                else:
+                    listener(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error in event listener for {event}: {e}")
 
 
 class WebSocketHandler(EventEmitter):
