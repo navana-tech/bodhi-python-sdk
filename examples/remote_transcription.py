@@ -68,9 +68,8 @@ async def main():
 
     try:
         # For remote URL transcription, events will be emitted during the transcribe_remote_url call
-        result = await client.transcribe_remote_url(audio_url, config=config)
+        await client.transcribe_remote_url(audio_url, config=config)
         logging.info("Remote URL transcription finished.")
-        logging.info("Final result: %s", result)
     except Exception as e:
         logging.error(f"Error during transcription: {str(e)}")
 
