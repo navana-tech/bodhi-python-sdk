@@ -36,6 +36,8 @@ To use the Bodhi Python SDK, follow these steps:
       ```python
       config = TranscriptionConfig(
         model="hi-banking-v2-8khz",
+        at_start_lid=False,    # Enable language identification at start (default: False)
+        transliterate=False,   # Enable transliteration output (default: False)
       )
       response = client.transcribe_local_file(audio_file_path, config=config)
       print(response.text)
@@ -46,6 +48,8 @@ To use the Bodhi Python SDK, follow these steps:
       ```python
       config = TranscriptionConfig(
         model="hi-banking-v2-8khz",
+        at_start_lid=False,    # Enable language identification at start (default: False)
+        transliterate=False,   # Enable transliteration output (default: False)
       )
       response = client.transcribe_remote_url("http://example.com/audio.wav", config)
       print(response.text)

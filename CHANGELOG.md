@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-01-08
+
+### Added
+
+- New configuration options in `TranscriptionConfig`:
+  - `at_start_lid` (bool, default: `False`): Enable language identification at the start of transcription.
+  - `transliterate` (bool, default: `False`): Enable transliteration output for transcription results.
+
+---
+
 ## [1.0.0.post1] - 2025-06-05
 
 ### Changed

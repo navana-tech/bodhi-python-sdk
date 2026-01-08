@@ -24,6 +24,8 @@ class TranscriptionConfig:
         aux: Optional[bool] = None,
         exclude_partial: Optional[bool] = None,
         sample_rate: Optional[int] = None,
+        at_start_lid: Optional[bool] = False,
+        transliterate: Optional[bool] = False,
     ):
         self.model = model
         self.transaction_id = transaction_id or str(uuid.uuid4())
@@ -32,6 +34,8 @@ class TranscriptionConfig:
         self.aux = aux
         self.exclude_partial = exclude_partial
         self.sample_rate = sample_rate
+        self.at_start_lid = at_start_lid
+        self.transliterate = transliterate
 
     def to_dict(self):
         """Convert Config instance to dictionary with JSON-serializable values"""
@@ -42,6 +46,8 @@ class TranscriptionConfig:
             "aux": self.aux,
             "exclude_partial": self.exclude_partial,
             "sample_rate": self.sample_rate if self.sample_rate else 8000,
+            "at_start_lid": self.at_start_lid if self.at_start_lid is not None else False,
+            "transliterate": self.transliterate if self.transliterate is not None else False,
         }
         if self.hotwords:
             config_dict["hotwords"] = [

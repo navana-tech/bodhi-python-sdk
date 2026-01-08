@@ -148,6 +148,8 @@ class TranscriptionHandler:
             aux=getattr(config, "aux"),
             exclude_partial=getattr(config, "exclude_partial"),
             sample_rate=getattr(config, "sample_rate"),
+            at_start_lid=getattr(config, "at_start_lid"),
+            transliterate=getattr(config, "transliterate"),
         )
 
         final_config = {}

@@ -61,6 +61,8 @@ async def main():
     # Example configuration with hotwords
     config = TranscriptionConfig(
         model="hi-banking-v2-8khz",
+        at_start_lid=False,    # Enable language identification at start (default: False)
+        transliterate=False,   # Enable transliteration output (default: False)
     )
 
     # Example with local file
