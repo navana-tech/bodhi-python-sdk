@@ -193,4 +193,9 @@ For a full talking bot, follow the
 [Pipecat quickstart](https://docs.pipecat.ai/pipecat/get-started/quickstart) and
 replace its `DeepgramSTTService(...)` line with the `BodhiSTTService(...)` above.
 
+`docs/pipecat-listing/bodhi.mdx` is this integration's service page for
+docs.pipecat.ai, submitted as a
+[community integration](https://github.com/pipecat-ai/pipecat/blob/main/COMMUNITY_INTEGRATIONS.md).
+Keep it in step with the parameters above.
+
 For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://navana.gitbook.io/bodhi).
