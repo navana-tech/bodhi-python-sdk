@@ -29,3 +29,4 @@ class TranscriptionResponse:
     type: str
     text: str
     segment_meta: SegmentMeta
+    language_code: Optional[str] = None
