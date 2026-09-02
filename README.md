@@ -90,4 +90,107 @@ To use the Bodhi Python SDK, follow these steps:
     - `LiveTranscriptionEvents.Error`: Emitted when an error occurs during transcription.
     - `LiveTranscriptionEvents.Close`: Emitted when the WebSocket connection is closed.
 
+## Pipecat integration
+
+Building a voice agent with [Pipecat](https://github.com/pipecat-ai/pipecat)? Bodhi
+drops into the STT slot of a Pipecat pipeline:
+
+```bash
+pip install "bodhi-sdk[pipecat]"
+```
+
+```python
+import os
+
+from pipecat.pipeline.pipeline import Pipeline
+
+from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
+
+stt = BodhiSTTService(
+    api_key=os.environ["BODHI_API_KEY"],
+    customer_id=os.environ["BODHI_CUSTOMER_ID"],
+    model="hi-general-v2-8khz",
+    settings=BodhiSTTService.Settings(
+        parse_number=True,                   # normalise numbers, dates, currency
+        endpoint_silence_duration=0.6,       # server-side endpointing, 0.44-1.2s
+        hotwords=[BodhiHotword("बजाज फिनसर्व", 2.0)],
+    ),
+)
+
+pipeline = Pipeline([
+    transport.input(),
+    stt,
+    context_aggregator.user(),
+    llm,
+    tts,
+    transport.output(),
+])
+```
+
+That is the whole integration — `api_key`, `customer_id` and `model` are the only
+required arguments, and `url` defaults to `wss://bodhi.navana.ai`. Bodhi's
+partial results arrive as `InterimTranscriptionFrame`s and its endpointed final
+results as `TranscriptionFrame`s, so interruption handling and turn taking work
+exactly as they do with any other Pipecat STT service.
+
+Maintained by [Navana Tech](https://navana.ai/), who build Bodhi.
+
+Written for pipecat-ai 1.4 and verified on 1.4.0 and 1.8.1. Streaming and
+transcripts also work as far back as 1.0.0; switching model or hotwords at
+runtime needs 1.4+, since that is where Pipecat's reconnect hook arrived. Needs
+Python 3.10+, as Pipecat does.
+
+If you pin `pipecat-ai` below 1.4, install plain `bodhi-sdk` (so pip doesn't
+touch your pin) and import the same module, or copy
+`bodhi/integrations/pipecat_stt.py` into your project — it is self-contained and
+imports nothing else from this SDK.
+
+### Advanced features
+
+Every field from the streaming
+[advanced features](https://navana.gitbook.io/bodhi/quickstart/streaming-websocket/advanced-features)
+page is reachable from here:
+
+| Bodhi feature | How to set it |
+|---|---|
+| Context biasing (hotwords) | `Settings(hotwords=[BodhiHotword("phrase", 2.0)])` |
+| Endpoint silence threshold | `Settings(endpoint_silence_duration=0.6)` — seconds, clamped server-side to 0.44–1.2 |
+| Parse numbers into numerals | `Settings(parse_number=True)` |
+| Partial result exclusion | `BodhiSTTService(..., interim_results=False)` — also stops the server sending them |
+| Aux metadata | `BodhiSTTService(..., aux=True)` |
+| Confidence and word timings | already on every frame's `result` |
+| Confidence filtering | `BodhiSTTService(..., min_confidence=0.5)` — Pipecat's guidance; `0` keeps everything |
+
+`result` carries the raw Bodhi message, so word timings and confidence are
+there on every final without setting any flag:
+
+```python
+segment = frame.result["segment_meta"]
+segment["confidence"]        # 0.87 — utterance level
+segment["words"][0]          # {"word": "आपने", "confidence": 0.873,
+                             #  "start_time": 0.32, "end_time": 0.48}
+```
+
+`aux=True` adds an `aux_info` block on top of that, with `request_time`,
+`eot_wait_time` and `processed_audio_duration` for latency debugging.
+
+### Trying it out
+
+Two runnable examples, neither needing an LLM or TTS key:
+
+```bash
+export BODHI_API_KEY=... BODHI_CUSTOMER_ID=...
+
+# 1. Transcribe a recording through a real Pipecat pipeline.
+python examples/pipecat_stream_wav.py examples/loan.wav --model hi-banking-v2-8khz
+
+# 2. Transcribe your microphone live in the browser.
+pip install "pipecat-ai[webrtc,silero,runner]"
+python examples/pipecat_mic_bot.py     # then open http://localhost:7860/client
+```
+
+For a full talking bot, follow the
+[Pipecat quickstart](https://docs.pipecat.ai/pipecat/get-started/quickstart) and
+replace its `DeepgramSTTService(...)` line with the `BodhiSTTService(...)` above.
+
 For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://navana.gitbook.io/bodhi).

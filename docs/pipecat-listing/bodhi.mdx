@@ -1,0 +1,162 @@
+---
+title: "Bodhi Speech-to-Text"
+sidebarTitle: "Bodhi"
+description: "BodhiSTTService transcribes Indian-language speech with Navana's Bodhi streaming ASR, inside Pipecat pipelines."
+---
+
+import { CommunityMaintained } from "/snippets/community-maintained.mdx";
+
+<CommunityMaintained
+  maintainer="Navana Tech"
+  maintainerUrl="https://github.com/navana-tech"
+  repo="https://github.com/navana-tech/bodhi-python-sdk"
+/>
+
+## Overview
+
+`BodhiSTTService` transcribes speech using [Bodhi](https://navana.ai/), Navana
+Tech's streaming ASR for Indian languages, built for telephony: 8 kHz and
+16 kHz models, server-side endpointing, and code-switched Hindi/English in a
+single model.
+
+The service streams PCM over Bodhi's websocket API and emits
+`InterimTranscriptionFrame` for Bodhi's partial results and
+`TranscriptionFrame` for each endpointed final. Word-level timings and
+confidence arrive on every final's `result`.
+
+<CardGroup cols={2}>
+  <Card
+    title="Source Repository"
+    icon="github"
+    href="https://github.com/navana-tech/bodhi-python-sdk"
+  >
+    Source code, examples, and issues for the Bodhi integration
+  </Card>
+  <Card
+    title="PyPI Package"
+    icon="cube"
+    href="https://pypi.org/project/bodhi-sdk/"
+  >
+    The `bodhi-sdk` package on PyPI
+  </Card>
+  <Card title="Bodhi Docs" icon="book" href="https://navana.gitbook.io/bodhi">
+    Models, streaming protocol, and advanced configuration
+  </Card>
+  <Card title="API Keys" icon="key" href="https://navana.ai/">
+    Request an API key and customer ID
+  </Card>
+</CardGroup>
+
+## Installation
+
+```bash
+uv add "bodhi-sdk[pipecat]"
+```
+
+## Prerequisites
+
+- A Bodhi API key and customer ID (`BODHI_API_KEY`, `BODHI_CUSTOMER_ID`)
+- A model name, e.g. `hi-banking-v2-8khz`
+- Python 3.10+
+
+## Configuration
+
+### Constructor parameters
+
+<ParamField path="api_key" type="str" required>
+  Bodhi API key, sent as the `x-api-key` header.
+</ParamField>
+
+<ParamField path="customer_id" type="str" required>
+  Bodhi customer ID (a UUID), sent as the `x-customer-id` header.
+</ParamField>
+
+<ParamField path="model" type="str" required>
+  Bodhi model name, e.g. `hi-banking-v2-8khz`.
+</ParamField>
+
+<ParamField path="url" type="str" default="wss://bodhi.navana.ai">
+  Bodhi websocket endpoint.
+</ParamField>
+
+<ParamField path="language" type="Language" default="from the model name">
+  Language used to tag transcription frames. Bodhi infers the language from the
+  model, so this is presentational.
+</ParamField>
+
+<ParamField path="interim_results" type="bool" default="True">
+  Emit `InterimTranscriptionFrame`s. Disabling also stops the server sending
+  partials.
+</ParamField>
+
+<ParamField path="min_confidence" type="float" default="0.5">
+  Drop finals below this utterance confidence. Pass `0` to keep everything.
+</ParamField>
+
+<ParamField path="aux" type="bool" default="False">
+  Attach Bodhi's latency metadata (`request_time`, `eot_wait_time`,
+  `processed_audio_duration`) to each message's `result`.
+</ParamField>
+
+<ParamField
+  path="transaction_id"
+  type="str"
+  default="a fresh UUID per connection"
+>
+  Correlates the session with Bodhi's logs and billing; readable at runtime as
+  `stt.transaction_id`.
+</ParamField>
+
+### Runtime settings
+
+Updatable with `STTUpdateSettingsFrame`; a change reconnects, deferred until
+the user stops speaking, because Bodhi accepts one config per connection.
+
+<ParamField path="model" type="str">
+  Switch models mid-session.
+</ParamField>
+
+<ParamField path="hotwords" type="list[BodhiHotword]">
+  Phrases to bias recognition towards, each with an optional score.
+</ParamField>
+
+<ParamField path="parse_number" type="bool" default="False">
+  Normalise numbers, dates and currency in the returned text.
+</ParamField>
+
+<ParamField path="endpoint_silence_duration" type="float">
+  Trailing silence before an utterance is finalised. Clamped server-side to
+  0.44–1.2 seconds.
+</ParamField>
+
+## Usage
+
+```python
+import os
+
+from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
+
+stt = BodhiSTTService(
+    api_key=os.getenv("BODHI_API_KEY"),
+    customer_id=os.getenv("BODHI_CUSTOMER_ID"),
+    model="hi-banking-v2-8khz",
+    settings=BodhiSTTService.Settings(
+        parse_number=True,
+        endpoint_silence_duration=0.6,
+        hotwords=[BodhiHotword("बजाज फिनसर्व", 2.0)],
+    ),
+)
+
+pipeline = Pipeline([
+    transport.input(),
+    stt,
+    context_aggregator.user(),
+    llm,
+    tts,
+    transport.output(),
+])
+```
+
+## Compatibility
+
+Tested with Pipecat v1.4.0 and v1.8.1.

@@ -2,12 +2,16 @@ from setuptools import setup, find_packages
 
 setup(
     name="bodhi-sdk",
-    version="1.2.0",
-    packages=["bodhi", "bodhi.utils"],
+    version="1.3.0",
+    packages=["bodhi", "bodhi.utils", "bodhi.integrations"],
     install_requires=[
         "requests",
         "aiohttp",
     ],
+    extras_require={
+        # The Pipecat integration; needs Python 3.10+, like Pipecat itself.
+        "pipecat": ["pipecat-ai>=1.4"],
+    },
     python_requires=">=3.7",
     author="Navana",
     description="Bodhi Python SDK for Streaming Speech Recognition",
