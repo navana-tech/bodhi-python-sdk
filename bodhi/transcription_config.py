@@ -24,6 +24,7 @@ class TranscriptionConfig:
         aux: Optional[bool] = None,
         exclude_partial: Optional[bool] = None,
         sample_rate: Optional[int] = None,
+        endpoint_silence_duration: Optional[float] = None,
         at_start_lid: Optional[bool] = False,
         transliterate: Optional[bool] = False,
     ):
@@ -34,6 +35,10 @@ class TranscriptionConfig:
         self.aux = aux
         self.exclude_partial = exclude_partial
         self.sample_rate = sample_rate
+        # Trailing silence, in seconds, before an utterance is finalised.
+        # Left out of the config message unless set, in which case the server
+        # applies its own default of 0.44. Values are clamped to 0.44-1.2.
+        self.endpoint_silence_duration = endpoint_silence_duration
         self.at_start_lid = at_start_lid
         self.transliterate = transliterate
 
@@ -49,8 +54,11 @@ class TranscriptionConfig:
             "at_start_lid": self.at_start_lid if self.at_start_lid is not None else False,
             "transliterate": self.transliterate if self.transliterate is not None else False,
         }
+        if self.endpoint_silence_duration is not None:
+            config_dict["endpoint_silence_duration"] = self.endpoint_silence_duration
         if self.hotwords:
             config_dict["hotwords"] = [
-                {"phrase": hw.phrase, "score": hw.score} for hw in self.hotwords
+                {"phrase": hw.phrase, **({} if hw.score is None else {"score": hw.score})}
+                for hw in self.hotwords
             ]
         return {k: v for k, v in config_dict.items() if v is not None}

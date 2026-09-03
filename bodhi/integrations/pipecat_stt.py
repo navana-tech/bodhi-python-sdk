@@ -142,9 +142,9 @@ class BodhiSTTSettings(STTSettings):
         hotwords: Phrases to bias recognition towards.
         parse_number: Ask Bodhi to normalise numbers, dates and currency in
             the returned text.
-        endpoint_silence_duration: Silence in seconds before Bodhi declares an
-            endpoint. Clamped server-side to 0.44-1.2; ``None`` keeps the
-            model's own default.
+        endpoint_silence_duration: Trailing silence in seconds before Bodhi
+            finalises an utterance. Not sent unless set, in which case the
+            server applies its default of 0.44. Clamped to 0.44-1.2.
     """
 
     hotwords: list[BodhiHotword] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

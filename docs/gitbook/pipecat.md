@@ -70,7 +70,7 @@ Recognition settings, passed through `BodhiSTTService.Settings`:
 | --------------------------- | -------------------------------------------------------------------------- |
 | `hotwords`                  | Boost domain phrases — see [Advanced Features](../quickstart/streaming-websocket/advanced-features.md)       |
 | `parse_number`              | Convert spoken numbers to numerals                                         |
-| `endpoint_silence_duration` | Trailing silence before an utterance is finalised (0.44–1.2s)              |
+| `endpoint_silence_duration` | Trailing silence before an utterance is finalised. Server default 0.44s, clamped to 0.44–1.2s |
 
 ```python
 stt = BodhiSTTService(

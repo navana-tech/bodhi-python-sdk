@@ -38,6 +38,10 @@ To use the Bodhi Python SDK, follow these steps:
         model="hi-banking-v2-8khz",
         at_start_lid=False,    # Enable language identification at start (default: False)
         transliterate=False,   # Enable transliteration output (default: False)
+        endpoint_silence_duration=0.6,  # Trailing silence before an utterance
+                                        # is finalised, in seconds. Omitted
+                                        # unless set; server default 0.44,
+                                        # clamped to 0.44-1.2
       )
       response = client.transcribe_local_file(audio_file_path, config=config)
       print(response.text)
@@ -50,6 +54,10 @@ To use the Bodhi Python SDK, follow these steps:
         model="hi-banking-v2-8khz",
         at_start_lid=False,    # Enable language identification at start (default: False)
         transliterate=False,   # Enable transliteration output (default: False)
+        endpoint_silence_duration=0.6,  # Trailing silence before an utterance
+                                        # is finalised, in seconds. Omitted
+                                        # unless set; server default 0.44,
+                                        # clamped to 0.44-1.2
       )
       response = client.transcribe_remote_url("http://example.com/audio.wav", config)
       print(response.text)
@@ -154,7 +162,7 @@ page is reachable from here:
 | Bodhi feature | How to set it |
 |---|---|
 | Context biasing (hotwords) | `Settings(hotwords=[BodhiHotword("phrase", 2.0)])` |
-| Endpoint silence threshold | `Settings(endpoint_silence_duration=0.6)` — seconds, clamped server-side to 0.44–1.2 |
+| Endpoint silence threshold | `Settings(endpoint_silence_duration=0.6)` — seconds; server default 0.44, clamped to 0.44–1.2 |
 | Parse numbers into numerals | `Settings(parse_number=True)` |
 | Partial result exclusion | `BodhiSTTService(..., interim_results=False)` — also stops the server sending them |
 | Aux metadata | `BodhiSTTService(..., aux=True)` |
