@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-09-02
+
+### Added
+
+- Pipecat integration: `bodhi.integrations.pipecat_stt.BodhiSTTService`, a streaming STT service for [Pipecat](https://github.com/pipecat-ai/pipecat) voice agents. Install with `pip install "bodhi-sdk[pipecat]"`. Bodhi partials become `InterimTranscriptionFrame`s and endpointed finals become `TranscriptionFrame`s, with hotwords, number parsing and endpointing exposed through `BodhiSTTService.Settings`. Written for pipecat-ai 1.4 and verified on 1.4.0 and 1.8.1, with streaming also verified on 1.0.0 (runtime settings changes need 1.4+); needs Python 3.10+, as Pipecat does.
+- Final transcripts below 50% utterance confidence are dropped, following Pipecat's guidance for services that report confidence; tune or disable with `min_confidence`. Measured live at 0.87-0.93 on clean speech, so the default drops nothing in practice.
+- The first keepalive after audio stops carries 1.5s of silence, past Bodhi's longest endpointing threshold, so a pending utterance is finalised during the gap instead of being merged with whatever is said after it. Verified live against `wss://bodhi.navana.ai` with a 25s gap.
+- `upload.sh` now builds with `python -m build` and refuses a non-normalised sdist filename. PyPI enforces PEP 625, and `setup.py sdist` on older setuptools produces `bodhi-sdk-<version>.tar.gz`, which PyPI rejects with a 400 *after* the wheel has uploaded — burning the version. The `safety` scan is now skipped when the tool isn't installed instead of aborting the release.
+- `tests/pipecat_smoke_test.py`, which exercises the integration against a fake Bodhi server (no credentials, no network); `examples/pipecat_stream_wav.py`, which streams a WAV file through a real Pipecat pipeline; and `examples/pipecat_mic_bot.py`, a browser microphone bot that prints live transcripts.
+
+---
+
+## [1.2.0] - 2026-01-08
+
+### Added
+
+- `language_code` field in `TranscriptionResponse` to expose the detected language from the server (e.g., `"hi"`, `"te"`, `"en"`).
+
+---
+
 ## [1.1.0] - 2026-01-08
 
 ### Added

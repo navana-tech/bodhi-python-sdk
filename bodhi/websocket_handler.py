@@ -165,6 +165,7 @@ class WebSocketHandler(EventEmitter):
                             )
                         ],
                     ),
+                    language_code=response_data.get("language_code"),
                 )
 
                 # Emit SpeechStarted if segment_id changes
