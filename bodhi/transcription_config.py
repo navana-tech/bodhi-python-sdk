@@ -35,8 +35,9 @@ class TranscriptionConfig:
         self.aux = aux
         self.exclude_partial = exclude_partial
         self.sample_rate = sample_rate
-        # Trailing silence, in seconds, before an utterance is finalised. The
-        # server clamps this to 0.44-1.2; None leaves the model's own default.
+        # Trailing silence, in seconds, before an utterance is finalised.
+        # Left out of the config message unless set, in which case the server
+        # applies its own default of 0.44. Values are clamped to 0.44-1.2.
         self.endpoint_silence_duration = endpoint_silence_duration
         self.at_start_lid = at_start_lid
         self.transliterate = transliterate
