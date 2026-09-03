@@ -38,6 +38,8 @@ To use the Bodhi Python SDK, follow these steps:
         model="hi-banking-v2-8khz",
         at_start_lid=False,    # Enable language identification at start (default: False)
         transliterate=False,   # Enable transliteration output (default: False)
+        endpoint_silence_duration=0.6,  # Trailing silence before an utterance is
+                                        # finalised, in seconds (0.44-1.2)
       )
       response = client.transcribe_local_file(audio_file_path, config=config)
       print(response.text)
@@ -50,6 +52,8 @@ To use the Bodhi Python SDK, follow these steps:
         model="hi-banking-v2-8khz",
         at_start_lid=False,    # Enable language identification at start (default: False)
         transliterate=False,   # Enable transliteration output (default: False)
+        endpoint_silence_duration=0.6,  # Trailing silence before an utterance is
+                                        # finalised, in seconds (0.44-1.2)
       )
       response = client.transcribe_remote_url("http://example.com/audio.wav", config)
       print(response.text)

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-09-03
+
+### Added
+
+- `endpoint_silence_duration` on `TranscriptionConfig`: trailing silence, in seconds, before an utterance is finalised. Documented on the [advanced features](https://navana.gitbook.io/bodhi/quickstart/streaming-websocket/advanced-features) page but previously unreachable from the SDK. The server clamps it to 0.44-1.2; `None` keeps the model's default. Verified live: 0.44 produced 6 utterances on a 23s call where 1.2 produced 4.
+
+### Fixed
+
+- `_prepare_config` rebuilt the caller's `TranscriptionConfig` from a hardcoded field list before sending it, so any field missing from that list was silently dropped on the way to the wire. It now serialises the caller's config directly. This affected `endpoint_silence_duration` and would have silently swallowed any future field.
+- Hotwords without a score no longer send `"score": null`, matching the Pipecat integration's serialisation.
+
+---
+
 ## [1.3.0] - 2026-09-02
 
 ### Added

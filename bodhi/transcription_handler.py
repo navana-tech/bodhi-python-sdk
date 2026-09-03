@@ -6,7 +6,6 @@ import os
 import wave
 import asyncio
 from typing import Any, Callable, List, Optional
-import uuid
 import requests
 import tempfile
 
@@ -140,20 +139,12 @@ class TranscriptionHandler:
             raise ConfigurationError(json.dumps(error_msg))
 
         self.config = config
-        config_instance = TranscriptionConfig(
-            model=config.model,
-            transaction_id=getattr(config, "transaction_id", str(uuid.uuid4())),
-            parse_number=getattr(config, "parse_number"),
-            hotwords=getattr(config, "hotwords"),
-            aux=getattr(config, "aux"),
-            exclude_partial=getattr(config, "exclude_partial"),
-            sample_rate=getattr(config, "sample_rate"),
-            at_start_lid=getattr(config, "at_start_lid"),
-            transliterate=getattr(config, "transliterate"),
-        )
 
+        # Serialise the caller's config directly. This used to rebuild a fresh
+        # TranscriptionConfig from a hardcoded field list, which silently
+        # dropped any field missing from that list before it reached the wire.
         final_config = {}
-        config_dict = config_instance.to_dict()
+        config_dict = config.to_dict()
         if config_dict:
             final_config.update(config_dict)
         logger.debug(f"Final configuration: {final_config}")
