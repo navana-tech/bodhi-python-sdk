@@ -8,7 +8,7 @@
 #
 #   pip install "bodhi-sdk[pipecat]" "pipecat-ai[webrtc,silero,runner]"
 #   export BODHI_API_KEY=...  BODHI_CUSTOMER_ID=...
-#   python examples/pipecat_mic_bot.py
+#   python -m bodhi.examples.pipecat_mic_bot
 #
 # Then open http://localhost:7860/client and click Connect.
 #
@@ -18,13 +18,7 @@
 #
 
 import os
-import sys
 import time
-from pathlib import Path
-
-# Run against this checkout rather than an installed bodhi-sdk.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline

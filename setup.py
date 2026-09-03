@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="bodhi-sdk",
     version="1.3.0",
-    packages=["bodhi", "bodhi.utils", "bodhi.integrations"],
+    packages=["bodhi", "bodhi.utils", "bodhi.integrations", "bodhi.examples"],
     install_requires=[
         "requests",
         "aiohttp",

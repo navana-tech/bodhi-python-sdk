@@ -4,7 +4,7 @@
 #
 #   pip install "bodhi-sdk[pipecat]"
 #   export BODHI_API_KEY=...  BODHI_CUSTOMER_ID=...
-#   python examples/pipecat_stream_wav.py call.wav --model hi-general-v2-8khz
+#   python -m bodhi.examples.pipecat_stream_wav call.wav --model hi-general-v2-8khz
 #
 # Audio is fed in real time (100 ms at a time), so partials and finals land
 # with the same timing a live call would see.
@@ -13,13 +13,9 @@
 import argparse
 import asyncio
 import os
-import sys
 import time
 import wave
 from pathlib import Path
-
-# Run against this checkout rather than an installed bodhi-sdk.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipecat.frames.frames import (
     EndFrame,
