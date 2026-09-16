@@ -19,9 +19,8 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 API_KEY = os.getenv("BODHI_API_KEY")
-CUSTOMER_ID = os.getenv("BODHI_CUSTOMER_ID")
-URI = "https://dev-bodhi.navana.ai"
-AUDIO_FILE = os.path.join(os.path.dirname(__file__), "toughlid.wav")
+URI = "wss://stt.navana.ai"
+AUDIO_FILE = os.path.join(os.path.dirname(__file__), "loan.wav")
 
 
 async def on_transcript(response: TranscriptionResponse):
@@ -56,16 +55,15 @@ async def main():
     print(f"BODHI SDK VERSION: {__version__}")
     print("=" * 60)
     
-    if __version__ != "1.2.0":
-        print(f"WARNING: Expected v1.2.0, got {__version__}")
-        print("Run: pip install --upgrade bodhi-sdk==1.2.0")
+    if __version__ != "1.0.0":
+        print(f"WARNING: Expected v1.0.0, got {__version__}")
+        print("Run: pip install --upgrade bodhi-api-sdk==1.0.0")
     
     print(f"Audio file: {AUDIO_FILE}")
     print()
 
     client = BodhiClient(
         api_key=API_KEY,
-        customer_id=CUSTOMER_ID,
         uri=URI,
     )
 

@@ -28,8 +28,8 @@ echo "🧹 Cleaning previous builds..."
 rm -rf build dist *.egg-info
 
 # Build with `python -m build`, not `setup.py sdist`. PyPI enforces PEP 625:
-# the sdist must be named bodhi_sdk-<version>.tar.gz. Older setuptools emits
-# bodhi-sdk-<version>.tar.gz, which PyPI rejects with a 400 *after* the wheel
+# the sdist must be named bodhi_api_sdk-<version>.tar.gz. Older setuptools emits
+# bodhi-api-sdk-<version>.tar.gz, which PyPI rejects with a 400 *after* the wheel
 # has already uploaded — burning the version number.
 echo "📦 Building distribution..."
 python -m build
@@ -38,7 +38,7 @@ echo "🔍 Checking metadata and filenames..."
 twine check dist/*
 for f in dist/*.tar.gz; do
   case "$(basename "$f")" in
-    bodhi_sdk-*) ;;
+    bodhi_api_sdk-*) ;;
     *) echo "❌ $f is not PEP 625 normalised; upgrade setuptools"; exit 1 ;;
   esac
 done

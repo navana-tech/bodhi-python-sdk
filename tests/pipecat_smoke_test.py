@@ -15,7 +15,7 @@ from pathlib import Path
 
 from websockets.asyncio.server import serve
 
-# Run against this checkout rather than an installed bodhi-sdk.
+# Run against this checkout rather than an installed bodhi-api-sdk.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipecat.frames.frames import (
@@ -30,7 +30,6 @@ from pipecat.transcriptions.language import Language
 
 from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
 
-CUSTOMER_ID = "00000000-0000-0000-0000-000000000001"
 CHUNK = b"\x11\x00" * 1600  # 100ms of 16kHz PCM16
 
 
@@ -73,7 +72,6 @@ async def test_transcription(pipeline_rate: int):
     async with serve(fake_bodhi(state, transcribe_on_audio=True), "127.0.0.1", 0) as server:
         stt = BodhiSTTService(
             api_key="test-key",
-            customer_id=CUSTOMER_ID,
             model="hi-general-v2-8khz",
             url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
             settings=BodhiSTTService.Settings(
@@ -98,7 +96,6 @@ async def test_transcription(pipeline_rate: int):
     config = state["configs"][0]
 
     assert state["headers"]["x-api-key"] == "test-key"
-    assert state["headers"]["x-customer-id"] == CUSTOMER_ID
     assert config["model"] == "hi-general-v2-8khz"
     assert config["sample_rate"] == (pipeline_rate if pipeline_rate in (8000, 16000) else 16000)
     assert config["channels"] == 1
@@ -141,7 +138,6 @@ async def test_confidence_filter():
     async with serve(handler, "127.0.0.1", 0) as server:
         stt = BodhiSTTService(
             api_key="test-key",
-            customer_id=CUSTOMER_ID,
             model="hi-general-v2-8khz",
             url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
             interim_results=False,
@@ -165,7 +161,6 @@ async def test_keepalive_and_settings_update():
     async with serve(fake_bodhi(state), "127.0.0.1", 0) as server:
         stt = BodhiSTTService(
             api_key="test-key",
-            customer_id=CUSTOMER_ID,
             model="en-general",
             url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
             keepalive_timeout=0.3,

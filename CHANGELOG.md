@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-09-16 (`bodhi-api-sdk`)
+
+First release of `bodhi-api-sdk`, the SDK for Bodhi's new API platform. It is
+published alongside `bodhi-sdk` 1.4.x, which keeps working against the old
+endpoint; `bodhi-sdk` will be retired once everyone has moved across.
+
+### Changed
+
+- **Package renamed** to `bodhi-api-sdk` on PyPI. The import is unchanged — still `from bodhi import BodhiClient` — so only your install line moves. Both packages ship the same `bodhi` module and so cannot be installed at the same time: run `pip uninstall bodhi-sdk` before installing this one, or you end up with a mix of the two.
+- **Auth is the API key alone.** `customer_id` is gone from `BodhiClient` and `BodhiSTTService`, along with the `BODHI_CUSTOMER_ID` environment variable, the UUID check and the `x-customer-id` header. Only `x-api-key` is sent now. Passing `customer_id=` raises `TypeError`, so a missed call site fails at once rather than silently authenticating as nobody.
+- **Default endpoint is `wss://stt.navana.ai`**, was `wss://bodhi.navana.ai`. Pass `uri=` (`BodhiClient`) or `url=` (`BodhiSTTService`) to point elsewhere.
+
+### Migrating from `bodhi-sdk`
+
+```bash
+pip uninstall bodhi-sdk
+pip install bodhi-api-sdk
+```
+
+```python
+# before
+client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)
+
+# after
+client = BodhiClient(api_key=API_KEY)
+```
+
+`BODHI_API_KEY` is unchanged, and so is every other import, class, method, event
+and config field. Drop the customer id and you are done.
+
+---
+
+# Earlier history (`bodhi-sdk`)
+
+Everything below is the release history of `bodhi-sdk`, the package this one
+replaces. Version numbers restart above, so the `1.0.0` dated 2025-06-04 is a
+`bodhi-sdk` release and unrelated to the `1.0.0` at the top of this file.
+
+---
+
 ## [1.4.0] - 2026-09-03
 
 ### Added

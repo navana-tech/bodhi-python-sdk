@@ -6,9 +6,11 @@
 # pipeline -- it is the smallest thing that exercises a real browser, real VAD
 # and real Bodhi:
 #
-#   pip install "bodhi-sdk[pipecat]" "pipecat-ai[webrtc,silero,runner]"
-#   export BODHI_API_KEY=...  BODHI_CUSTOMER_ID=...
+#   pip install "bodhi-api-sdk[pipecat]" "pipecat-ai[webrtc,silero,runner]"
+#   export BODHI_API_KEY=...
 #   python -m bodhi.examples.pipecat_mic_bot
+#
+# Set BODHI_URL to point at another deployment, e.g. wss://stt.navana.ai.
 #
 # Then open http://localhost:7860/client and click Connect.
 #
@@ -31,9 +33,10 @@ from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
-from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
+from bodhi.integrations.pipecat_stt import BODHI_DEFAULT_URL, BodhiHotword, BodhiSTTService
 
 MODEL = os.getenv("BODHI_MODEL", "hi-general-v2-8khz")
+URL = os.getenv("BODHI_URL", BODHI_DEFAULT_URL)
 
 # Comma-separated, each "phrase" or "phrase:score", e.g. "बजाज फिनसर्व:2.0".
 HOTWORDS = [
@@ -65,9 +68,8 @@ class TranscriptPrinter(FrameProcessor):
 async def bot(runner_args: RunnerArguments):
     """Run the transcription pipeline for one browser connection."""
     api_key = os.getenv("BODHI_API_KEY")
-    customer_id = os.getenv("BODHI_CUSTOMER_ID")
-    if not api_key or not customer_id:
-        raise SystemExit("set BODHI_API_KEY and BODHI_CUSTOMER_ID first")
+    if not api_key:
+        raise SystemExit("set BODHI_API_KEY first")
 
     # Whichever leg the client connects on: browser WebRTC, or a websocket.
     def params():
@@ -84,12 +86,12 @@ async def bot(runner_args: RunnerArguments):
 
     stt = BodhiSTTService(
         api_key=api_key,
-        customer_id=customer_id,
         model=MODEL,
+        url=URL,
         settings=BodhiSTTService.Settings(hotwords=HOTWORDS or None),
     )
 
-    print(f"transcribing with Bodhi model {MODEL}; speak into the browser tab", flush=True)
+    print(f"transcribing with Bodhi model {MODEL} at {URL}; speak into the browser tab", flush=True)
 
     worker = PipelineWorker(
         Pipeline([transport.input(), stt, TranscriptPrinter(), transport.output()]),

@@ -35,27 +35,27 @@ confidence arrive on every final's `result`.
   <Card
     title="PyPI Package"
     icon="cube"
-    href="https://pypi.org/project/bodhi-sdk/"
+    href="https://pypi.org/project/bodhi-api-sdk/"
   >
-    The `bodhi-sdk` package on PyPI
+    The `bodhi-api-sdk` package on PyPI
   </Card>
   <Card title="Bodhi Docs" icon="book" href="https://navana.gitbook.io/bodhi">
     Models, streaming protocol, and advanced configuration
   </Card>
   <Card title="API Keys" icon="key" href="https://navana.ai/">
-    Request an API key and customer ID
+    Request an API key
   </Card>
 </CardGroup>
 
 ## Installation
 
 ```bash
-uv add "bodhi-sdk[pipecat]"
+uv add "bodhi-api-sdk[pipecat]"
 ```
 
 ## Prerequisites
 
-- A Bodhi API key and customer ID (`BODHI_API_KEY`, `BODHI_CUSTOMER_ID`)
+- A Bodhi API key (`BODHI_API_KEY`)
 - A model name, e.g. `hi-banking-v2-8khz`
 - Python 3.10+
 
@@ -67,15 +67,11 @@ uv add "bodhi-sdk[pipecat]"
   Bodhi API key, sent as the `x-api-key` header.
 </ParamField>
 
-<ParamField path="customer_id" type="str" required>
-  Bodhi customer ID (a UUID), sent as the `x-customer-id` header.
-</ParamField>
-
 <ParamField path="model" type="str" required>
   Bodhi model name, e.g. `hi-banking-v2-8khz`.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://bodhi.navana.ai">
+<ParamField path="url" type="str" default="wss://stt.navana.ai">
   Bodhi websocket endpoint.
 </ParamField>
 
@@ -138,7 +134,6 @@ from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
 
 stt = BodhiSTTService(
     api_key=os.getenv("BODHI_API_KEY"),
-    customer_id=os.getenv("BODHI_CUSTOMER_ID"),
     model="hi-banking-v2-8khz",
     settings=BodhiSTTService.Settings(
         parse_number=True,

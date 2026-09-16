@@ -1,14 +1,13 @@
-# Bodhi Python SDK Examples
+# Bodhi API Python SDK Examples
 
-This folder contains example scripts demonstrating how to use the Bodhi Python SDK.
+This folder contains example scripts demonstrating how to use the Bodhi API Python SDK.
 
 ## Prerequisites
 
-1. Set your credentials as environment variables:
+1. Set your API key as an environment variable:
 
    ```bash
    export BODHI_API_KEY='your_api_key'
-   export BODHI_CUSTOMER_ID='your_customer_id'
    ```
 
 2. Install required dependencies:

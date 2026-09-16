@@ -2,14 +2,14 @@
 # Bodhi (Navana Tech) Speech-to-Text service for Pipecat.
 #
 # Written for pipecat-ai 1.4, and verified on 1.0.0, 1.4.0 and 1.8.1. Install with
-# `pip install "bodhi-sdk[pipecat]"`; no changes to pipecat itself are needed.
+# `pip install "bodhi-api-sdk[pipecat]"`; no changes to pipecat itself are needed.
 # The file is also self-contained, so it can simply be copied into a project
-# that pins an older bodhi-sdk.
+# that pins an older bodhi-api-sdk.
 #
 
 """Bodhi Speech-to-Text service for Pipecat 1.x.
 
-Streams PCM audio to a Bodhi ASR websocket endpoint (``wss://bodhi.navana.ai``
+Streams PCM audio to a Bodhi ASR websocket endpoint (``wss://stt.navana.ai``
 by default) and converts Bodhi's ``partial`` / ``complete`` messages into
 Pipecat ``InterimTranscriptionFrame`` / ``TranscriptionFrame``.
 
@@ -24,10 +24,8 @@ reconnect hook; on older versions audio and transcripts work as normal.
 
 Protocol notes that shape the implementation:
 
-* Auth is two request headers, ``x-api-key`` and ``x-customer-id``. The
-  ``Sec-WebSocket-Protocol`` form the Bodhi docs also mention is *not* usable
-  here: the server reads the customer id back out of the ``X-Customer-Id``
-  header when it applies the config message.
+* Auth is a single request header, ``x-api-key``. The
+  ``Sec-WebSocket-Protocol`` form the Bodhi docs also mention is not used here.
 * Exactly one config message per connection, sent before any audio. Sending a
   second one is an error, so runtime settings changes reconnect instead.
 * The server closes a connection after 15s without a message, hence the
@@ -81,7 +79,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
-BODHI_DEFAULT_URL = "wss://bodhi.navana.ai"
+BODHI_DEFAULT_URL = "wss://stt.navana.ai"
 
 #: Sample rates Bodhi models are served at. Anything else is resampled.
 BODHI_SAMPLE_RATES = (8000, 16000)
@@ -181,7 +179,6 @@ class BodhiSTTService(WebsocketSTTService):
 
         stt = BodhiSTTService(
             api_key=os.getenv("BODHI_API_KEY"),
-            customer_id=os.getenv("BODHI_CUSTOMER_ID"),
             model="hi-general-v2-8khz",
             settings=BodhiSTTService.Settings(
                 parse_number=True,
@@ -197,7 +194,6 @@ class BodhiSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        customer_id: str,
         model: str,
         url: str = BODHI_DEFAULT_URL,
         sample_rate: int | None = None,
@@ -214,9 +210,8 @@ class BodhiSTTService(WebsocketSTTService):
 
         Args:
             api_key: Bodhi API key, sent as the ``x-api-key`` header.
-            customer_id: Bodhi customer id (a UUID), sent as ``x-customer-id``.
             model: Bodhi model name, e.g. ``"hi-general-v2-8khz"``.
-            url: Bodhi websocket URL. Defaults to ``wss://bodhi.navana.ai``.
+            url: Bodhi websocket URL. Defaults to ``wss://stt.navana.ai``.
             sample_rate: Input sample rate in Hz. Defaults to the pipeline's.
             language: Language to tag frames with. Defaults to the model's
                 language prefix, and keeps following the model on a later
@@ -268,7 +263,6 @@ class BodhiSTTService(WebsocketSTTService):
         )
 
         self._api_key = api_key
-        self._customer_id = customer_id
         self._url = url
         self._interim_results = interim_results
         self._aux = aux
@@ -423,7 +417,7 @@ class BodhiSTTService(WebsocketSTTService):
 
             logger.debug(f"{self.name} connecting to Bodhi at {self._url}")
             self._config_sent = False
-            headers = {"x-api-key": self._api_key, "x-customer-id": self._customer_id}
+            headers = {"x-api-key": self._api_key}
             try:
                 self._websocket = await websocket_connect(self._url, additional_headers=headers)
             except TypeError:
