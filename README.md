@@ -1,12 +1,41 @@
-# Bodhi Python SDK
+# Bodhi API Python SDK
 
-Bodhi Python SDK provides a client for Navana's streaming speech recognition API.
+Bodhi API Python SDK provides a client for Navana's streaming speech recognition API.
 
 ## Installation
 
 ```bash
-pip install bodhi-sdk
+pip install bodhi-api-sdk
 ```
+
+### Moving from `bodhi-sdk`
+
+`bodhi-api-sdk` is the SDK for Bodhi's new API platform. Your imports do not
+change — only the package you install, and the credentials you pass:
+
+```bash
+pip uninstall bodhi-sdk
+pip install bodhi-api-sdk
+```
+
+```python
+# before, with bodhi-sdk
+from bodhi import BodhiClient
+client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)
+
+# now, with bodhi-api-sdk
+from bodhi import BodhiClient
+client = BodhiClient(api_key=API_KEY)
+```
+
+Drop `customer_id` and you are done. Classes, methods, events, config fields and
+`BODHI_API_KEY` are all unchanged. The default endpoint is now
+`wss://stt.navana.ai`.
+
+**Uninstall `bodhi-sdk` first.** Both packages install the same `bodhi` module,
+so they cannot be installed at the same time — installing one on top of the
+other leaves you with a mix of the two. `bodhi-sdk` 1.4.x keeps working against
+the old endpoint and will be retired once everyone has moved across.
 
 ## Usage
 
@@ -16,16 +45,16 @@ To use the Bodhi Python SDK, follow these steps:
     Install the SDK using pip:
 
     ```bash
-    pip install bodhi-sdk
+    pip install bodhi-api-sdk
     ```
 
 2.  **Initialization:**
-    Create a `BodhiClient` instance with your API key and customer ID:
+    Create a `BodhiClient` instance with your API key:
 
     ```python
     from bodhi import BodhiClient
 
-    client = BodhiClient(api_key="YOUR_API_KEY", customer_id="YOUR_CUSTOMER_ID")
+    client = BodhiClient(api_key="YOUR_API_KEY")
     ```
 
 3.  **Transcription:**
@@ -104,7 +133,7 @@ Building a voice agent with [Pipecat](https://github.com/pipecat-ai/pipecat)? Bo
 drops into the STT slot of a Pipecat pipeline:
 
 ```bash
-pip install "bodhi-sdk[pipecat]"
+pip install "bodhi-api-sdk[pipecat]"
 ```
 
 ```python
@@ -116,7 +145,6 @@ from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
 
 stt = BodhiSTTService(
     api_key=os.environ["BODHI_API_KEY"],
-    customer_id=os.environ["BODHI_CUSTOMER_ID"],
     model="hi-general-v2-8khz",
     settings=BodhiSTTService.Settings(
         parse_number=True,                   # normalise numbers, dates, currency
@@ -135,8 +163,8 @@ pipeline = Pipeline([
 ])
 ```
 
-That is the whole integration — `api_key`, `customer_id` and `model` are the only
-required arguments, and `url` defaults to `wss://bodhi.navana.ai`. Bodhi's
+That is the whole integration — `api_key` and `model` are the only
+required arguments, and `url` defaults to `wss://stt.navana.ai`. Bodhi's
 partial results arrive as `InterimTranscriptionFrame`s and its endpointed final
 results as `TranscriptionFrame`s, so interruption handling and turn taking work
 exactly as they do with any other Pipecat STT service.
@@ -148,7 +176,7 @@ transcripts also work as far back as 1.0.0; switching model or hotwords at
 runtime needs 1.4+, since that is where Pipecat's reconnect hook arrived. Needs
 Python 3.10+, as Pipecat does.
 
-If you pin `pipecat-ai` below 1.4, install plain `bodhi-sdk` (so pip doesn't
+If you pin `pipecat-ai` below 1.4, install plain `bodhi-api-sdk` (so pip doesn't
 touch your pin) and import the same module, or copy
 `bodhi/integrations/pipecat_stt.py` into your project — it is self-contained and
 imports nothing else from this SDK.
@@ -156,7 +184,7 @@ imports nothing else from this SDK.
 ### Advanced features
 
 Every field from the streaming
-[advanced features](https://navana.gitbook.io/bodhi/quickstart/streaming-websocket/advanced-features)
+[advanced features](https://docs.navana.ai/speech-to-text/advanced-features/)
 page is reachable from here:
 
 | Bodhi feature | How to set it |
@@ -187,14 +215,15 @@ segment["words"][0]          # {"word": "आपने", "confidence": 0.873,
 Two runnable examples, neither needing an LLM or TTS key:
 
 ```bash
-export BODHI_API_KEY=... BODHI_CUSTOMER_ID=...
+export BODHI_API_KEY=...
 
 # 1. Transcribe a recording through a real Pipecat pipeline.
-python examples/pipecat_stream_wav.py examples/loan.wav --model hi-banking-v2-8khz
+curl -O https://stt.navana.ai/audios/loan.wav
+python -m bodhi.examples.pipecat_stream_wav loan.wav --model hi-banking-v2-8khz
 
 # 2. Transcribe your microphone live in the browser.
 pip install "pipecat-ai[webrtc,silero,runner]"
-python examples/pipecat_mic_bot.py     # then open http://localhost:7860/client
+python -m bodhi.examples.pipecat_mic_bot     # then open http://localhost:7860/client
 ```
 
 For a full talking bot, follow the
@@ -206,4 +235,4 @@ docs.pipecat.ai, submitted as a
 [community integration](https://github.com/pipecat-ai/pipecat/blob/main/COMMUNITY_INTEGRATIONS.md).
 Keep it in step with the parameters above.
 
-For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://navana.gitbook.io/bodhi).
+For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://docs.navana.ai/introduction/).

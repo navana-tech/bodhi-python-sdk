@@ -17,7 +17,6 @@ logging.basicConfig(
 # Load credentials from .env file
 load_dotenv()
 API_KEY = os.getenv("BODHI_API_KEY")
-CUSTOMER_ID = os.getenv("BODHI_CUSTOMER_ID")
 
 
 async def on_transcript(response: TranscriptionResponse):
@@ -41,15 +40,11 @@ async def on_close():
 
 
 async def main():
-    if not API_KEY or not CUSTOMER_ID:
-        logging.error(
-            "Please set BODHI_API_KEY and BODHI_CUSTOMER_ID environment variables"
-        )
-        raise ValueError(
-            "Please set BODHI_API_KEY and BODHI_CUSTOMER_ID environment variables"
-        )
+    if not API_KEY:
+        logging.error("Please set the BODHI_API_KEY environment variable")
+        raise ValueError("Please set the BODHI_API_KEY environment variable")
 
-    client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)
+    client = BodhiClient(api_key=API_KEY)
 
     # Register event listeners
     client.on(LiveTranscriptionEvents.Transcript, on_transcript)

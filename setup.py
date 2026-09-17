@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="bodhi-sdk",
-    version="1.4.0",
+    name="bodhi-api-sdk",
+    version="1.0.0",
     packages=["bodhi", "bodhi.utils", "bodhi.integrations", "bodhi.examples"],
     install_requires=[
         "requests",
@@ -14,10 +14,10 @@ setup(
     },
     python_requires=">=3.7",
     author="Navana",
-    description="Bodhi Python SDK for Streaming Speech Recognition",
+    description="Bodhi API Python SDK for Streaming Speech Recognition",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/navana-ai/bodhi-python-sdk",
+    url="https://github.com/navana-tech/bodhi-python-sdk",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

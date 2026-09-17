@@ -175,3 +175,5 @@ cython_debug/
 
 # vsCode settings
 .vscode/
+# macOS
+.DS_Store

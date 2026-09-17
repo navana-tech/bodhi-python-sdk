@@ -13,7 +13,6 @@ from .transcription_response import TranscriptionResponse
 from .utils.logger import logger
 from .utils.exceptions import ConfigurationError, ConnectionError, StreamingError
 from .events import LiveTranscriptionEvents
-import uuid
 
 
 chunk_duration_ms = 100
@@ -23,14 +22,12 @@ class BodhiClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        customer_id: Optional[str] = None,
         uri: Optional[str] = None,
     ):
         """Initialize Bodhi client.
 
         Args:
             api_key: API key for authentication
-            customer_id: Customer ID for authentication
             uri: WebSocket URI for the service
         """
         self.api_key = api_key or os.environ.get("BODHI_API_KEY")
@@ -41,27 +38,8 @@ class BodhiClient:
             )
             raise ConfigurationError(json.dumps(error_msg))
 
-        self.customer_id = customer_id or os.environ.get("BODHI_CUSTOMER_ID")
-        if not self.customer_id:
-            logger.error("Customer ID not provided and not found in environment")
-            error_msg = make_error_response(
-                message="Customer ID is required", code=BodhiErrors.BadRequest.value
-            )
-            raise ConfigurationError(json.dumps(error_msg))
-
-        try:
-            uuid.UUID(self.customer_id)
-        except ValueError:
-            error_msg = make_error_response(
-                message="Customer ID must be a valid UUID.",
-                code=BodhiErrors.BadRequest.value,
-            )
-            raise ConfigurationError(json.dumps(error_msg))
-
-        self.websocket_url = uri or "wss://bodhi.navana.ai"
-        self.websocket_handler = WebSocketHandler(
-            self.api_key, self.customer_id, self.websocket_url
-        )
+        self.websocket_url = uri or "wss://stt.navana.ai"
+        self.websocket_handler = WebSocketHandler(self.api_key, self.websocket_url)
         self.transcription_handler = TranscriptionHandler(self.websocket_handler)
 
     async def start_connection(

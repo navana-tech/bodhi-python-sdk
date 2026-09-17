@@ -2,8 +2,8 @@
 # Stream a WAV file through BodhiSTTService in a real Pipecat pipeline and
 # print the transcripts as they arrive.
 #
-#   pip install "bodhi-sdk[pipecat]"
-#   export BODHI_API_KEY=...  BODHI_CUSTOMER_ID=...
+#   pip install "bodhi-api-sdk[pipecat]"
+#   export BODHI_API_KEY=...
 #   python -m bodhi.examples.pipecat_stream_wav call.wav --model hi-general-v2-8khz
 #
 # Audio is fed in real time (100 ms at a time), so partials and finals land
@@ -30,7 +30,7 @@ from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.workers.runner import WorkerRunner
 
-from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
+from bodhi.integrations.pipecat_stt import BODHI_DEFAULT_URL, BodhiHotword, BodhiSTTService
 
 CHUNK_SECONDS = 0.1
 
@@ -77,16 +77,15 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wav", type=Path, help="mono 16-bit WAV file to stream")
     parser.add_argument("--model", default=os.getenv("BODHI_MODEL", "hi-general-v2-8khz"))
-    parser.add_argument("--url", default=os.getenv("BODHI_URL", "wss://bodhi.navana.ai"))
+    parser.add_argument("--url", default=os.getenv("BODHI_URL", BODHI_DEFAULT_URL))
     parser.add_argument("--api-key", default=os.getenv("BODHI_API_KEY"))
-    parser.add_argument("--customer-id", default=os.getenv("BODHI_CUSTOMER_ID"))
     parser.add_argument("--hotword", action="append", default=[], metavar="PHRASE[:SCORE]")
     parser.add_argument("--parse-number", action="store_true", help="normalise numbers and dates")
     parser.add_argument("--no-partials", action="store_true", help="finals only")
     args = parser.parse_args()
 
-    if not args.api_key or not args.customer_id:
-        raise SystemExit("set BODHI_API_KEY and BODHI_CUSTOMER_ID (or pass --api-key/--customer-id)")
+    if not args.api_key:
+        raise SystemExit("set BODHI_API_KEY (or pass --api-key)")
 
     hotwords = []
     for spec in args.hotword:
@@ -102,7 +101,6 @@ async def main():
 
     stt = BodhiSTTService(
         api_key=args.api_key,
-        customer_id=args.customer_id,
         model=args.model,
         url=args.url,
         interim_results=not args.no_partials,

@@ -46,17 +46,15 @@ class EventEmitter:
 
 
 class WebSocketHandler(EventEmitter):
-    def __init__(self, api_key: str, customer_id: str, websocket_url: str):
+    def __init__(self, api_key: str, websocket_url: str):
         """Initialize WebSocket handler.
 
         Args:
             api_key: API key for authentication
-            customer_id: Customer ID for authentication
             websocket_url: WebSocket URI for the service
         """
         super().__init__()
         self.api_key = api_key
-        self.customer_id = customer_id
         self.websocket_url = websocket_url
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
@@ -72,7 +70,6 @@ class WebSocketHandler(EventEmitter):
         """
         request_headers = {
             "x-api-key": self.api_key,
-            "x-customer-id": self.customer_id,
         }
 
         connect_kwargs = {

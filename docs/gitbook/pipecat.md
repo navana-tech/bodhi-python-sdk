@@ -13,10 +13,10 @@ Pipecat handles VAD, interruptions and turn taking. `BodhiSTTService` handles th
 ### :rocket: Install
 
 ```bash
-pip install "bodhi-sdk[pipecat]"
+pip install "bodhi-api-sdk[pipecat]"
 ```
 
-Needs `pipecat-ai` 1.4 or later and Python 3.10 or later. If you pin `pipecat-ai` below 1.4, install plain `bodhi-sdk` instead so pip leaves your pin alone — the same import still works.
+Needs `pipecat-ai` 1.4 or later and Python 3.10 or later. If you pin `pipecat-ai` below 1.4, install plain `bodhi-api-sdk` instead so pip leaves your pin alone — the same import still works.
 
 ***
 
@@ -31,7 +31,6 @@ from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
 
 stt = BodhiSTTService(
     api_key=os.environ["BODHI_API_KEY"],
-    customer_id=os.environ["BODHI_CUSTOMER_ID"],
     model="hi-banking-v2-8khz",
 )
 
@@ -56,9 +55,8 @@ Set when you create the service:
 | Parameter          | Default                | Purpose                                                                       |
 | ------------------ | ---------------------- | ----------------------------------------------------------------------------- |
 | `api_key`          | required               | Sent as the `x-api-key` header                                                |
-| `customer_id`      | required               | Your customer UUID, sent as `x-customer-id`                                   |
 | `model`           | required                | Any Bodhi ASR model — see the list below                         |
-| `url`              | `wss://bodhi.navana.ai`| Point at your own deployment if you run one                                   |
+| `url`              | `wss://stt.navana.ai`  | Point at your own deployment if you run one                                   |
 | `interim_results`  | `True`                 | Emit partials. Turning it off also stops the server sending them              |
 | `min_confidence`   | `0.5`                  | Drop finals below this confidence. `0` keeps everything                       |
 | `aux`              | `False`                | Attach latency metadata to each result                                        |
@@ -75,7 +73,6 @@ Recognition settings, passed through `BodhiSTTService.Settings`:
 ```python
 stt = BodhiSTTService(
     api_key=os.environ["BODHI_API_KEY"],
-    customer_id=os.environ["BODHI_CUSTOMER_ID"],
     model="hi-banking-v2-8khz",
     settings=BodhiSTTService.Settings(
         parse_number=True,
@@ -143,13 +140,12 @@ Bodhi models are served at 8 kHz and 16 kHz. If your pipeline runs at either, au
 
 ### :test_tube: Try it in five minutes
 
-Two runnable examples ship with the SDK. Neither needs an LLM or a text-to-speech key — just your API key and customer ID from the dashboard (see [Bodhi Overview](/pages/DEhLxI5Cvi4ED5EhSslR)) and Python 3.10 or later.
+Two runnable examples ship with the SDK. Neither needs an LLM or a text-to-speech key — just your API key from the dashboard (see [Bodhi Overview](/pages/DEhLxI5Cvi4ED5EhSslR)) and Python 3.10 or later.
 
 ```bash
-pip install "bodhi-sdk[pipecat]"
+pip install "bodhi-api-sdk[pipecat]"
 
 export BODHI_API_KEY=your-api-key
-export BODHI_CUSTOMER_ID=your-customer-id
 ```
 
 #### 1. Transcribe your microphone
@@ -174,7 +170,7 @@ python -m bodhi.examples.pipecat_stream_wav call.wav --model hi-banking-v2-8khz
 Any mono 16-bit WAV works — convert with `ffmpeg -i in.wav -ac 1 -ar 8000 -sample_fmt s16 out.wav`. The file is streamed at real-time speed through a real Pipecat pipeline, so partials and finals arrive with the timing a live call would see:
 
 ```
-streaming 23.0s of 16000 Hz audio to wss://bodhi.navana.ai as hi-banking-v2-8khz
+streaming 23.0s of 16000 Hz audio to wss://stt.navana.ai as hi-banking-v2-8khz
 [  6.89s] FINAL   आपने हाल ही में कोई नया इन्वेस्टमेंट प्लान देखा है क्या
 [ 10.32s] FINAL   digital banking के युग में
 [ 15.89s] FINAL   आप किस ऐप को बैंकिंग के लिए सबसे ज्यादा पसंद करते हैं
