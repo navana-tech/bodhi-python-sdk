@@ -184,7 +184,7 @@ imports nothing else from this SDK.
 ### Advanced features
 
 Every field from the streaming
-[advanced features](https://navana.gitbook.io/bodhi/quickstart/streaming-websocket/advanced-features)
+[advanced features](https://docs.navana.ai/speech-to-text/advanced-features/)
 page is reachable from here:
 
 | Bodhi feature | How to set it |
@@ -235,4 +235,4 @@ docs.pipecat.ai, submitted as a
 [community integration](https://github.com/pipecat-ai/pipecat/blob/main/COMMUNITY_INTEGRATIONS.md).
 Keep it in step with the parameters above.
 
-For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://navana.gitbook.io/bodhi).
+For complete code examples and detailed usage instructions for various scenarios, please refer to the [official documentation](https://docs.navana.ai/introduction/).
