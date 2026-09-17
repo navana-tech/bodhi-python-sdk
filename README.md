@@ -218,11 +218,12 @@ Two runnable examples, neither needing an LLM or TTS key:
 export BODHI_API_KEY=...
 
 # 1. Transcribe a recording through a real Pipecat pipeline.
-python examples/pipecat_stream_wav.py examples/loan.wav --model hi-banking-v2-8khz
+curl -O https://stt.navana.ai/audios/loan.wav
+python -m bodhi.examples.pipecat_stream_wav loan.wav --model hi-banking-v2-8khz
 
 # 2. Transcribe your microphone live in the browser.
 pip install "pipecat-ai[webrtc,silero,runner]"
-python examples/pipecat_mic_bot.py     # then open http://localhost:7860/client
+python -m bodhi.examples.pipecat_mic_bot     # then open http://localhost:7860/client
 ```
 
 For a full talking bot, follow the
