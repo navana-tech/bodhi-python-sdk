@@ -319,8 +319,14 @@ class BodhiTTSService(InterruptibleTTSService):
                 return
 
             logger.debug(f"{self.name} connecting to Bodhi TTS at {self._url}")
+            # Both header styles: this endpoint reads Authorization while the
+            # STT endpoint reads x-api-key, and each ignores the other.
             self._websocket = await websocket_connect(
-                self._url, additional_headers={"Authorization": f"Bearer {self._api_key}"}
+                self._url,
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "x-api-key": self._api_key,
+                },
             )
 
             hello = self._build_hello()

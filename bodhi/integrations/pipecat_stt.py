@@ -426,7 +426,13 @@ class BodhiSTTService(WebsocketSTTService):
 
             logger.debug(f"{self.name} connecting to Bodhi at {self._url}")
             self._config_sent = False
-            headers = {"x-api-key": self._api_key}
+            # Both header styles: the STT endpoint reads x-api-key and the TTS
+            # endpoint reads Authorization, and each ignores the other. Sending
+            # both keeps this working whichever a deployment accepts.
+            headers = {
+                "x-api-key": self._api_key,
+                "Authorization": f"Bearer {self._api_key}",
+            }
             try:
                 self._websocket = await websocket_connect(self._url, additional_headers=headers)
             except TypeError:
