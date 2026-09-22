@@ -8,4 +8,5 @@ imported by the core SDK. For Pipecat::
     pip install "bodhi-api-sdk[stt,tts]"  # both
 
     from bodhi.integrations.pipecat_stt import BodhiSTTService
+    from bodhi.integrations.pipecat_tts import BodhiTTSService
 """

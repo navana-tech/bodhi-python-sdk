@@ -198,6 +198,35 @@ touch your pin) and import the same module, or copy
 `bodhi/integrations/pipecat_stt.py` into your project — it is self-contained and
 imports nothing else from this SDK.
 
+### Text-to-speech
+
+Bodhi's TTS fills the other end of the same pipeline:
+
+```bash
+pip install "bodhi-api-sdk[tts]"
+```
+
+```python
+from pipecat.transcriptions.language import Language
+
+from bodhi.integrations.pipecat_tts import BodhiTTSService
+
+tts = BodhiTTSService(
+    api_key=os.environ["BODHI_API_KEY"],
+    language=Language.HI,
+    voice="default_female",        # or default_male, or a voice you have added
+)
+```
+
+Ten languages, two built-in voices each, and audio at 8, 16 or 24 kHz — the
+service asks for whatever rate your pipeline runs at. Synthesis streams back
+chunk by chunk, so playback starts before the whole utterance is generated.
+
+Because Bodhi's TTS has no cancel command, the service is built on Pipecat's
+`InterruptibleTTSService`: when the user barges in, it reconnects rather than
+leaving stale audio in flight. Interruption handling therefore behaves as it
+does with any other Pipecat TTS service.
+
 ### Advanced features
 
 Every field from the streaming
