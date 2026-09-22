@@ -17,6 +17,29 @@ pip install bodhi-api-sdk
 
 Python 3.7+. You need an API key from your Bodhi dashboard.
 
+## Moving from `bodhi-sdk`
+
+`bodhi-api-sdk` targets Bodhi's new API platform. Imports do not change — only
+the package you install and the credentials you pass:
+
+```bash
+pip uninstall bodhi-sdk        # do this first, see below
+pip install bodhi-api-sdk
+```
+
+```python
+client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)   # before
+client = BodhiClient(api_key=API_KEY)                            # now
+```
+
+Drop `customer_id` and you are done. Classes, methods, events, config fields and
+`BODHI_API_KEY` are unchanged; the default endpoint is now
+`wss://stt.navana.ai`.
+
+**Uninstall `bodhi-sdk` first.** Both packages install the same `bodhi` module,
+so installing one over the other leaves a mix of the two. `bodhi-sdk` 1.4.x
+keeps working against the old endpoint until it is retired.
+
 ## Quickstart
 
 Results arrive through events, so register a handler and then hand the client
@@ -120,29 +143,6 @@ await client.close_connection()
 ```
 
 Transcripts arrive on the same event handlers throughout.
-
-## Moving from `bodhi-sdk`
-
-`bodhi-api-sdk` targets Bodhi's new API platform. Imports do not change — only
-the package you install and the credentials you pass:
-
-```bash
-pip uninstall bodhi-sdk        # do this first, see below
-pip install bodhi-api-sdk
-```
-
-```python
-client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)   # before
-client = BodhiClient(api_key=API_KEY)                            # now
-```
-
-Drop `customer_id` and you are done. Classes, methods, events, config fields and
-`BODHI_API_KEY` are unchanged; the default endpoint is now
-`wss://stt.navana.ai`.
-
-**Uninstall `bodhi-sdk` first.** Both packages install the same `bodhi` module,
-so installing one over the other leaves a mix of the two. `bodhi-sdk` 1.4.x
-keeps working against the old endpoint until it is retired.
 
 ## Pipecat integration
 
