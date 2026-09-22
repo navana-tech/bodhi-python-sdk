@@ -6,7 +6,7 @@
 # pipeline -- it is the smallest thing that exercises a real browser, real VAD
 # and real Bodhi:
 #
-#   pip install "bodhi-api-sdk[pipecat]" "pipecat-ai[webrtc,silero,runner]"
+#   pip install "bodhi-api-sdk[stt]" "pipecat-ai[webrtc,silero,runner]"
 #   export BODHI_API_KEY=...
 #   python -m bodhi.examples.pipecat_mic_bot
 #

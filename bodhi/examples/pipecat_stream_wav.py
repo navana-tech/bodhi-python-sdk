@@ -2,7 +2,7 @@
 # Stream a WAV file through BodhiSTTService in a real Pipecat pipeline and
 # print the transcripts as they arrive.
 #
-#   pip install "bodhi-api-sdk[pipecat]"
+#   pip install "bodhi-api-sdk[stt]"
 #   export BODHI_API_KEY=...
 #   python -m bodhi.examples.pipecat_stream_wav call.wav --model hi-general-v2-8khz
 #

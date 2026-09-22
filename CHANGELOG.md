@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1] - 2026-09-22
+
+### Added
+
+- `stt` and `tts` extras, so the install string names the service rather than the framework: `pip install "bodhi-api-sdk[stt]"`. Both resolve to `pipecat-ai>=1.4` today; naming them now keeps the install string stable if either later needs a dependency the other does not. `[pipecat]` still works as an alias.
+- `bodhi.integrations.pipecat_stt` raises an `ImportError` naming the extra when Pipecat is missing, instead of failing on a transitive import.
+
+---
+
 ## [1.0.0] - 2026-09-16 (`bodhi-api-sdk`)
 
 First release of `bodhi-api-sdk`, the SDK for Bodhi's new API platform. It is

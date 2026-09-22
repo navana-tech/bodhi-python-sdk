@@ -133,7 +133,7 @@ Building a voice agent with [Pipecat](https://github.com/pipecat-ai/pipecat)? Bo
 drops into the STT slot of a Pipecat pipeline:
 
 ```bash
-pip install "bodhi-api-sdk[pipecat]"
+pip install "bodhi-api-sdk[stt]"
 ```
 
 ```python
