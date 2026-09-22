@@ -1,131 +1,148 @@
 # Bodhi API Python SDK
 
-Bodhi API Python SDK provides a client for Navana's streaming speech recognition API.
+Streaming speech recognition for Indian languages, from
+[Navana](https://navana.ai/). Ten languages, bilingual with English, built for
+telephony — 8 kHz and 16 kHz models, server-side endpointing, word-level
+timings and confidence.
 
-## Installation
+[Documentation](https://docs.navana.ai/introduction/) ·
+[Advanced features](https://docs.navana.ai/speech-to-text/advanced-features/) ·
+[Pipecat integration](#pipecat-integration)
+
+## Install
 
 ```bash
 pip install bodhi-api-sdk
 ```
 
-### Moving from `bodhi-sdk`
+Python 3.7+. You need an API key from your Bodhi dashboard.
 
-`bodhi-api-sdk` is the SDK for Bodhi's new API platform. Your imports do not
-change — only the package you install, and the credentials you pass:
+## Moving from `bodhi-sdk`
+
+`bodhi-api-sdk` targets Bodhi's new API platform. Imports do not change — only
+the package you install and the credentials you pass:
 
 ```bash
-pip uninstall bodhi-sdk
+pip uninstall bodhi-sdk        # do this first, see below
 pip install bodhi-api-sdk
 ```
 
 ```python
-# before, with bodhi-sdk
-from bodhi import BodhiClient
-client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)
-
-# now, with bodhi-api-sdk
-from bodhi import BodhiClient
-client = BodhiClient(api_key=API_KEY)
+client = BodhiClient(api_key=API_KEY, customer_id=CUSTOMER_ID)   # before
+client = BodhiClient(api_key=API_KEY)                            # now
 ```
 
 Drop `customer_id` and you are done. Classes, methods, events, config fields and
-`BODHI_API_KEY` are all unchanged. The default endpoint is now
+`BODHI_API_KEY` are unchanged; the default endpoint is now
 `wss://stt.navana.ai`.
 
 **Uninstall `bodhi-sdk` first.** Both packages install the same `bodhi` module,
-so they cannot be installed at the same time — installing one on top of the
-other leaves you with a mix of the two. `bodhi-sdk` 1.4.x keeps working against
-the old endpoint and will be retired once everyone has moved across.
+so installing one over the other leaves a mix of the two. `bodhi-sdk` 1.4.x
+keeps working against the old endpoint until it is retired.
 
-## Usage
+## Quickstart
 
-To use the Bodhi Python SDK, follow these steps:
+Results arrive through events, so register a handler and then hand the client
+some audio:
 
-1.  **Installation:**
-    Install the SDK using pip:
+```python
+import asyncio
+import os
 
-    ```bash
-    pip install bodhi-api-sdk
-    ```
+from bodhi import BodhiClient, LiveTranscriptionEvents, TranscriptionConfig
 
-2.  **Initialization:**
-    Create a `BodhiClient` instance with your API key:
 
-    ```python
-    from bodhi import BodhiClient
-
-    client = BodhiClient(api_key="YOUR_API_KEY")
-    ```
-
-3.  **Transcription:**
-    Use the client methods to transcribe audio. The SDK supports transcription from local files, remote URLs, and streams.
-
-    - **Local File Transcription:**
-
-      ```python
-      config = TranscriptionConfig(
-        model="hi-banking-v2-8khz",
-        at_start_lid=False,    # Enable language identification at start (default: False)
-        transliterate=False,   # Enable transliteration output (default: False)
-        endpoint_silence_duration=0.6,  # Trailing silence before an utterance
-                                        # is finalised, in seconds. Omitted
-                                        # unless set; server default 0.44,
-                                        # clamped to 0.44-1.2
-      )
-      response = client.transcribe_local_file(audio_file_path, config=config)
-      print(response.text)
-      ```
-
-    - **Remote URL Transcription:**
-
-      ```python
-      config = TranscriptionConfig(
-        model="hi-banking-v2-8khz",
-        at_start_lid=False,    # Enable language identification at start (default: False)
-        transliterate=False,   # Enable transliteration output (default: False)
-        endpoint_silence_duration=0.6,  # Trailing silence before an utterance
-                                        # is finalised, in seconds. Omitted
-                                        # unless set; server default 0.44,
-                                        # clamped to 0.44-1.2
-      )
-      response = client.transcribe_remote_url("http://example.com/audio.wav", config)
-      print(response.text)
-      ```
-
-    - **Streaming Transcription:**
-      Refer to the examples for detailed instructions on setting up streaming transcription.
-
-4.  **Event Handling:**
-    You can register event listeners to handle different stages of the transcription process using the `client.on` method and the `LiveTranscriptionEvents` enum. This is particularly useful for streaming and remote URL transcriptions where events are emitted asynchronously.
-
-    ```python
-    from bodhi import LiveTranscriptionEvents
+async def main():
+    client = BodhiClient(api_key=os.environ["BODHI_API_KEY"])
 
     async def on_transcript(response):
-        print(f"Transcript: {response.text}")
+        # "partial" results stream as you speak; "complete" is a finished utterance
+        if response.type == "complete" and response.text.strip():
+            print(response.text, response.segment_meta.confidence)
 
-    async def on_utterance_end(response):
-        print(f"UtteranceEnd: {response}")
-
-    async def on_speech_started(response):
-        print(f"SpeechStarted: {response}")
-
-    async def on_error(e):
-        print(f"Error: {str(e)}")
+    async def on_error(error):
+        print("error:", error)
 
     client.on(LiveTranscriptionEvents.Transcript, on_transcript)
-    client.on(LiveTranscriptionEvents.UtteranceEnd, on_utterance_end)
-    client.on(LiveTranscriptionEvents.SpeechStarted, on_speech_started)
     client.on(LiveTranscriptionEvents.Error, on_error)
-    ```
 
-    Common events include:
+    await client.transcribe_local_file(
+        "call.wav",
+        TranscriptionConfig(model="hi-banking-v2-8khz", sample_rate=8000),
+    )
 
-    - `LiveTranscriptionEvents.Transcript`: Emitted when a new transcription segment is available.
-    - `LiveTranscriptionEvents.UtteranceEnd`: Emitted when an utterance is detected as complete.
-    - `LiveTranscriptionEvents.SpeechStarted`: Emitted when speech activity is detected.
-    - `LiveTranscriptionEvents.Error`: Emitted when an error occurs during transcription.
-    - `LiveTranscriptionEvents.Close`: Emitted when the WebSocket connection is closed.
+
+asyncio.run(main())
+```
+
+```
+आपने हाल ही में कोई नया इन्वेस्टमेंट प्लान देखा है क्या 0.887073
+digital banking के युग में 0.9034769
+```
+
+The audio must be mono 16-bit PCM WAV. Convert with
+`ffmpeg -i in.wav -af "pan=mono|c0=c0" -ar 8000 -c:a pcm_s16le out.wav`, which
+also picks a single channel out of a stereo call recording.
+
+## Configuration
+
+```python
+TranscriptionConfig(
+    model="hi-banking-v2-8khz",       # required
+    sample_rate=8000,                 # match your audio: 8000 for telephony
+    parse_number=True,                # "तीन लाख अस्सी हजार" -> "380000"
+    exclude_partial=True,             # finals only, less traffic
+    endpoint_silence_duration=0.6,    # trailing silence before an utterance ends
+    hotwords=[Hotword("बजाज फिनसर्व", 2.5), Hotword("सुविधा")],
+    aux=True,                         # timing metadata for latency debugging
+)
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `model` | required | e.g. `hi-banking-v2-8khz`; banking or general, per language |
+| `sample_rate` | `8000` | must match the audio |
+| `parse_number` | `False` | spoken numbers become numerals |
+| `exclude_partial` | `False` | stop the server sending partial results |
+| `endpoint_silence_duration` | server default `0.44` | seconds, clamped to 0.44–1.2; higher merges utterances, lower cuts turns sooner |
+| `hotwords` | — | boost domain phrases; score ~2–2.5 for multi-word phrases |
+| `aux` | `False` | adds `request_time`, `eot_wait_time`, `processed_audio_duration` |
+
+## What you get back
+
+Every response carries the text and its metadata:
+
+```python
+response.type                        # "partial" or "complete"
+response.text                        # the transcript
+response.segment_meta.confidence     # 0.887 — utterance level
+response.segment_meta.words[0].word  # "आपने"
+response.segment_meta.words[0].confidence
+response.segment_meta.timestamps     # per-token times
+```
+
+Confidence is reported on finished utterances, so read it inside the
+`type == "complete"` branch above. Clean speech typically scores 0.87–0.93;
+around 0.5 is a sensible floor for discarding noise.
+
+## Live audio
+
+For a microphone, a phone call or any live source, drive the session yourself
+instead of handing over a file:
+
+```python
+await client.start_connection(config=config)
+
+while True:
+    chunk = get_audio()            # 16-bit PCM, e.g. 20 ms at a time
+    if not chunk:
+        break
+    await client.send_audio_stream(chunk)
+
+await client.close_connection()
+```
+
+Transcripts arrive on the same event handlers throughout.
 
 ## Pipecat integration
 
@@ -133,7 +150,7 @@ Building a voice agent with [Pipecat](https://github.com/pipecat-ai/pipecat)? Bo
 drops into the STT slot of a Pipecat pipeline:
 
 ```bash
-pip install "bodhi-api-sdk[pipecat]"
+pip install "bodhi-api-sdk[stt]"
 ```
 
 ```python
@@ -180,6 +197,35 @@ If you pin `pipecat-ai` below 1.4, install plain `bodhi-api-sdk` (so pip doesn't
 touch your pin) and import the same module, or copy
 `bodhi/integrations/pipecat_stt.py` into your project — it is self-contained and
 imports nothing else from this SDK.
+
+### Text-to-speech
+
+Bodhi's TTS fills the other end of the same pipeline:
+
+```bash
+pip install "bodhi-api-sdk[tts]"
+```
+
+```python
+from pipecat.transcriptions.language import Language
+
+from bodhi.integrations.pipecat_tts import BodhiTTSService
+
+tts = BodhiTTSService(
+    api_key=os.environ["BODHI_API_KEY"],
+    language=Language.HI,
+    voice="default_female",        # or default_male, or a voice you have added
+)
+```
+
+Ten languages, two built-in voices each, and audio at 8, 16 or 24 kHz — the
+service asks for whatever rate your pipeline runs at. Synthesis streams back
+chunk by chunk, so playback starts before the whole utterance is generated.
+
+Because Bodhi's TTS has no cancel command, the service is built on Pipecat's
+`InterruptibleTTSService`: when the user barges in, it reconnects rather than
+leaving stale audio in flight. Interruption handling therefore behaves as it
+does with any other Pipecat TTS service.
 
 ### Advanced features
 

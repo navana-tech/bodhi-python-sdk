@@ -13,7 +13,7 @@ Pipecat handles VAD, interruptions and turn taking. `BodhiSTTService` handles th
 ### :rocket: Install
 
 ```bash
-pip install "bodhi-api-sdk[pipecat]"
+pip install "bodhi-api-sdk[stt]"
 ```
 
 Needs `pipecat-ai` 1.4 or later and Python 3.10 or later. If you pin `pipecat-ai` below 1.4, install plain `bodhi-api-sdk` instead so pip leaves your pin alone — the same import still works.
@@ -143,7 +143,7 @@ Bodhi models are served at 8 kHz and 16 kHz. If your pipeline runs at either, au
 Two runnable examples ship with the SDK. Neither needs an LLM or a text-to-speech key — just your API key from the dashboard (see [Bodhi Overview](/pages/DEhLxI5Cvi4ED5EhSslR)) and Python 3.10 or later.
 
 ```bash
-pip install "bodhi-api-sdk[pipecat]"
+pip install "bodhi-api-sdk[stt]"
 
 export BODHI_API_KEY=your-api-key
 ```

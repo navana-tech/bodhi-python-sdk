@@ -2,7 +2,7 @@
 # Bodhi (Navana Tech) Speech-to-Text service for Pipecat.
 #
 # Written for pipecat-ai 1.4, and verified on 1.0.0, 1.4.0 and 1.8.1. Install with
-# `pip install "bodhi-api-sdk[pipecat]"`; no changes to pipecat itself are needed.
+# `pip install "bodhi-api-sdk[stt]"`; no changes to pipecat itself are needed.
 # The file is also self-contained, so it can simply be copied into a project
 # that pins an older bodhi-api-sdk.
 #
@@ -39,6 +39,15 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+
+# loguru and websockets arrive with pipecat, so check for pipecat first and
+# fail with an instruction instead of a bare ModuleNotFoundError.
+try:
+    import pipecat  # noqa: F401
+except ImportError as e:  # pragma: no cover - depends on how the SDK was installed
+    raise ImportError(
+        'BodhiSTTService needs Pipecat: pip install "bodhi-api-sdk[stt]"'
+    ) from e
 
 from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
@@ -417,7 +426,13 @@ class BodhiSTTService(WebsocketSTTService):
 
             logger.debug(f"{self.name} connecting to Bodhi at {self._url}")
             self._config_sent = False
-            headers = {"x-api-key": self._api_key}
+            # Both header styles: the STT endpoint reads x-api-key and the TTS
+            # endpoint reads Authorization, and each ignores the other. Sending
+            # both keeps this working whichever a deployment accepts.
+            headers = {
+                "x-api-key": self._api_key,
+                "Authorization": f"Bearer {self._api_key}",
+            }
             try:
                 self._websocket = await websocket_connect(self._url, additional_headers=headers)
             except TypeError:
