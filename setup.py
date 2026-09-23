@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="bodhi-api-sdk",
-    version="1.0.1",
+    version="1.1.0",
     packages=["bodhi", "bodhi.utils", "bodhi.integrations", "bodhi.examples"],
     install_requires=[
         "requests",
