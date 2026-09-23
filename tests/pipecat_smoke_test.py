@@ -1,5 +1,6 @@
 #
-# Smoke test for bodhi.integrations.pipecat_stt against a fake Bodhi server.
+# Smoke test for bodhi.integrations.pipecat_stt and pipecat_tts against fake
+# Bodhi servers.
 #
 # Needs no credentials and no network. Run it to check the integration still
 # fits a given pipecat version:
@@ -19,18 +20,25 @@ from websockets.asyncio.server import serve
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
+    TTSSpeakFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.pipeline.task import PipelineParams
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 
 from bodhi.integrations.pipecat_stt import BodhiHotword, BodhiSTTService
+from bodhi.integrations.pipecat_tts import BodhiTTSService
 
 CHUNK = b"\x11\x00" * 1600  # 100ms of 16kHz PCM16
+TTS_CHUNK = b"\x22\x00" * 1200  # 50ms of 24kHz PCM16
 
 
 def new_state():
@@ -203,11 +211,147 @@ async def test_keepalive_and_settings_update():
     print(f"keepalive + settings update: OK ({state['silence']} silence chunks, 2 configs)")
 
 
+def new_tts_state():
+    return {"headers": {}, "connections": 0, "hellos": [], "texts": [], "end": False}
+
+
+def fake_bodhi_tts(state, *, chunks=2, error=None):
+    """A stand-in for Bodhi TTS: hello/ready, then audio headers + binary chunks.
+
+    Mirrors the wire protocol the service expects -- every binary frame is
+    preceded by its JSON header, and only the last header carries
+    ``is_last_chunk``, which is what ends the utterance.
+    """
+
+    async def handler(ws):
+        state["connections"] += 1
+        state["headers"] = dict(ws.request.headers)
+        async for message in ws:
+            data = json.loads(message)
+            kind = data.get("type")
+
+            if kind == "hello":
+                state["hellos"].append(data)
+                rate = int(data["output_format"].split(":")[0])
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "ready",
+                            "session_id": f"ws-fake-{state['connections']}",
+                            "protocol_version": 2,
+                            "sample_rate": rate,
+                            "encoding": "pcm16",
+                        }
+                    )
+                )
+
+            elif kind == "text":
+                state["texts"].append(data)
+                if error is not None:
+                    await ws.send(
+                        json.dumps(
+                            {"type": "error", "code": error, "message": "no such voice", "fatal": False}
+                        )
+                    )
+                    continue
+                for index in range(chunks):
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "audio",
+                                "seq": data["seq"],
+                                "chunk_index": index,
+                                "chunk_total": chunks,
+                                "is_last_chunk": index == chunks - 1,
+                                "inference_ms": 5,
+                            }
+                        )
+                    )
+                    await ws.send(TTS_CHUNK)
+
+            elif kind == "end":
+                state["end"] = True
+                await ws.send(json.dumps({"type": "done", "seq": data.get("seq")}))
+
+    return handler
+
+
+async def test_tts_synthesis(out_rate: int):
+    """Hello fields, auth headers, text frames and the audio/started/stopped frames."""
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+            voice="default_male",
+            language=Language.HI,
+            settings=BodhiTTSService.Settings(use_fast=True, num_step=6),
+        )
+        frames = [TTSSpeakFrame("नमस्ते"), SleepFrame(sleep=0.5)]
+        down, up = await run_test(
+            tts,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_out_sample_rate=out_rate),
+        )
+
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    started = [f for f in down if isinstance(f, TTSStartedFrame)]
+    stopped = [f for f in down if isinstance(f, TTSStoppedFrame)]
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    hello = state["hellos"][0]
+
+    # Both header styles, so one client works against STT and TTS alike.
+    assert state["headers"]["x-api-key"] == "test-key"
+    assert state["headers"]["authorization"] == "Bearer test-key"
+    assert hello["lang"] == "hi"
+    assert hello["voice"] == "default_male"
+    assert hello["output_format"] == f"{out_rate}:pcm16"
+    assert hello["use_fast"] is True
+    assert hello["num_step"] == 6
+    # Unknown fields are rejected by the server, so unset knobs must stay out.
+    assert "guidance_scale" not in hello
+    assert [t["target_text"] for t in state["texts"]] == ["नमस्ते"]
+    assert state["texts"][0]["seq"] == 1, "text frames are numbered from 1"
+    assert not errors, f"unexpected error frames: {errors}"
+    assert len(started) == 1, f"expected one TTSStartedFrame, got {len(started)}"
+    assert len(audio) == 2, f"expected both audio chunks, got {len(audio)}"
+    assert all(f.sample_rate == out_rate for f in audio)
+    assert b"".join(f.audio for f in audio) == TTS_CHUNK * 2
+    assert stopped, "is_last_chunk did not end the utterance"
+    print(f"tts synthesis @ {out_rate} Hz: OK ({len(audio)} chunks, {len(b''.join(f.audio for f in audio))} bytes)")
+
+
+async def test_tts_error_is_reported():
+    """A server error frame surfaces as an ErrorFrame rather than a hang."""
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state, error="bad_voice"), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+            voice="nonexistent",
+        )
+        frames = [TTSSpeakFrame("नमस्ते"), SleepFrame(sleep=0.5)]
+        down, up = await run_test(
+            tts,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert errors, "server error was swallowed"
+    assert "bad_voice" in str(errors[0]), f"error lost its code: {errors[0]}"
+    assert not [f for f in down if isinstance(f, TTSAudioRawFrame)], "audio despite an error"
+    print("tts error reporting: OK (bad_voice surfaced)")
+
+
 async def main():
     await test_transcription(16000)
     await test_transcription(24000)
     await test_confidence_filter()
     await test_keepalive_and_settings_update()
+    await test_tts_synthesis(24000)
+    await test_tts_synthesis(8000)
+    await test_tts_error_is_reported()
     print("all checks passed")
 
 
