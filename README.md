@@ -1,12 +1,13 @@
 # Bodhi API Python SDK
 
-Streaming speech recognition for Indian languages, from
+Speech recognition and text-to-speech for Indian languages, from
 [Navana](https://navana.ai/). Ten languages, bilingual with English, built for
 telephony — 8 kHz and 16 kHz models, server-side endpointing, word-level
-timings and confidence.
+timings and confidence, and voices that stream as they are spoken.
 
 [Documentation](https://docs.navana.ai/introduction/) ·
 [Advanced features](https://docs.navana.ai/speech-to-text/advanced-features/) ·
+[Text-to-speech](#text-to-speech) ·
 [Pipecat integration](#pipecat-integration)
 
 ## Install
@@ -143,6 +144,65 @@ await client.close_connection()
 ```
 
 Transcripts arrive on the same event handlers throughout.
+
+## Text-to-speech
+
+`BodhiTTSClient` speaks text in the same ten languages. One request for a whole
+clip:
+
+```python
+import asyncio, os
+from bodhi import BodhiTTSClient
+
+
+async def main():
+    client = BodhiTTSClient(api_key=os.environ["BODHI_API_KEY"])
+
+    speech = await client.synthesize("नमस्ते, यह बोधि की आवाज़ है।", lang="hi")
+    speech.save("hello.wav")
+
+
+asyncio.run(main())
+```
+
+The audio comes back raw, with no container — `save()` writes a playable WAV.
+`speech.sample_rate` is what the server actually used; trust it over what you
+asked for.
+
+For a live conversation, stream instead, and play each chunk as it arrives:
+
+```python
+async for chunk in client.stream("नमस्ते, यह बोधि की आवाज़ है।", lang="hi"):
+    play(chunk)
+```
+
+First audio arrives in roughly 300 ms and the rest follows faster than it plays,
+so the caller hears speech while the sentence is still being synthesized. Pass a
+list of strings to send several utterances down one connection — useful for
+speaking an LLM's sentences as they appear:
+
+```python
+async for chunk in client.stream(["पहला वाक्य।", "दूसरा वाक्य।"], lang="hi"):
+    play(chunk)
+```
+
+### Voices and formats
+
+```python
+speech = await client.synthesize(
+    "नमस्ते",
+    lang="hi",
+    voice="default_male",     # or a cloned cv_… voice
+    sample_rate=8000,         # 8000, 16000 or 24000
+    encoding="mulaw",         # pcm16, mulaw (telephony) or float32
+    speed=1.1,                # 0.25–4.0, one-shot synthesis only
+)
+```
+
+`8000` + `mulaw` is the telephony pair, and twelve times smaller than the
+24 kHz default. A cloned `cv_…` voice only works for the language it was cloned
+under. `num_step` and `guidance_scale` tune quality against latency; leave them
+alone to get each voice's own defaults.
 
 ## Pipecat integration
 
