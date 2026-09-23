@@ -80,7 +80,10 @@ except ImportError:  # pipecat 1.0 - 1.4
 
 from pipecat.services.settings import TTSSettings
 
-BODHI_TTS_DEFAULT_URL = "wss://tts.navana.ai"
+#: The streaming endpoint. The server serves the websocket on ``/v1`` and
+#: refuses any other path; the bare host answers with a 308 to ``/v1``, so
+#: connecting directly costs one round trip less.
+BODHI_TTS_DEFAULT_URL = "wss://tts.navana.ai/v1"
 
 #: Sample rates the server will synthesise at.
 BODHI_TTS_SAMPLE_RATES = (8000, 16000, 24000)
@@ -153,7 +156,7 @@ class BodhiTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Bodhi API key, sent as ``Authorization: Bearer``.
-            url: Bodhi TTS websocket URL. Defaults to ``wss://tts.navana.ai``.
+            url: Bodhi TTS websocket URL. Defaults to ``wss://tts.navana.ai/v1``.
             voice: Voice id, e.g. ``default_female`` or ``default_male``.
             language: Language to synthesise in. Defaults to Hindi.
             sample_rate: Output rate in Hz. Defaults to the pipeline's, falling
