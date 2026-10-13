@@ -9,4 +9,11 @@ imported by the core SDK. For Pipecat::
 
     from bodhi.integrations.pipecat_stt import BodhiSTTService
     from bodhi.integrations.pipecat_tts import BodhiTTSService
+
+For LiveKit Agents::
+
+    pip install "bodhi-api-sdk[livekit]"
+
+    from bodhi.integrations.livekit_stt import BodhiSTT
+    from bodhi.integrations.livekit_tts import BodhiTTS
 """

@@ -16,6 +16,8 @@ setup(
         "tts": ["pipecat-ai>=1.4"],
         # Alias, so instructions that predate the split keep working.
         "pipecat": ["pipecat-ai>=1.4"],
+        # LiveKit Agents integration (STT + TTS); needs Python 3.9+.
+        "livekit": ["livekit-agents>=1.0"],
     },
     python_requires=">=3.7",
     author="Navana",

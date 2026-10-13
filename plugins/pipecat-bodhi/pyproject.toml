@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pipecat-bodhi"
+dynamic = ["version"]
+description = "Pipecat services for Bodhi (Navana Tech) STT and TTS"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Navana Tech" }]
+keywords = ["voice", "ai", "realtime", "audio", "pipecat", "bodhi", "navana", "stt", "tts"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "pipecat-ai>=1.4",
+    "bodhi-api-sdk>=1.3",
+]
+
+[project.urls]
+Homepage = "https://www.navanatech.in/"
+Source = "https://github.com/navana-tech/bodhi-python-sdk"
+
+[tool.hatch.version]
+path = "pipecat_bodhi/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pipecat_bodhi"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/pipecat_bodhi", "/README.md"]
