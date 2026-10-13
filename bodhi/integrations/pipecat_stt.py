@@ -205,6 +205,7 @@ class BodhiSTTService(WebsocketSTTService):
         api_key: str,
         model: str,
         url: str = BODHI_DEFAULT_URL,
+        extra_headers: dict[str, str] | None = None,
         sample_rate: int | None = None,
         language: Language | str | None = None,
         transaction_id: str | None = None,
@@ -221,6 +222,9 @@ class BodhiSTTService(WebsocketSTTService):
             api_key: Bodhi API key, sent as the ``x-api-key`` header.
             model: Bodhi model name, e.g. ``"hi-general-v2-8khz"``.
             url: Bodhi websocket URL. Defaults to ``wss://stt.navana.ai``.
+            extra_headers: Additional handshake headers, merged over the defaults.
+                Needed for deployments that authenticate on more than the key --
+                the legacy platform wants ``x-customer-id`` alongside it.
             sample_rate: Input sample rate in Hz. Defaults to the pipeline's.
             language: Language to tag frames with. Defaults to the model's
                 language prefix, and keeps following the model on a later
@@ -273,6 +277,7 @@ class BodhiSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._url = url
+        self._extra_headers = extra_headers
         self._interim_results = interim_results
         self._aux = aux
         self._min_confidence = min_confidence
@@ -433,6 +438,11 @@ class BodhiSTTService(WebsocketSTTService):
                 "x-api-key": self._api_key,
                 "Authorization": f"Bearer {self._api_key}",
             }
+            # Merged last so a caller can override either default, not just add
+            # to them -- a deployment that rejects an unexpected Authorization
+            # header needs to be able to remove it, not only append.
+            if self._extra_headers:
+                headers.update(self._extra_headers)
             try:
                 self._websocket = await websocket_connect(self._url, additional_headers=headers)
             except TypeError:
