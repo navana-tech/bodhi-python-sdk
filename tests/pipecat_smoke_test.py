@@ -23,7 +23,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     STTUpdateSettingsFrame,
+    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -219,8 +222,8 @@ def fake_bodhi_tts(state, *, chunks=2, error=None):
     """A stand-in for Bodhi TTS: hello/ready, then audio headers + binary chunks.
 
     Mirrors the wire protocol the service expects -- every binary frame is
-    preceded by its JSON header, and only the last header carries
-    ``is_last_chunk``, which is what ends the utterance.
+    preceded by its JSON header, and only the last header of a text frame
+    carries ``is_last_chunk``.
     """
 
     async def handler(ws):
@@ -321,6 +324,80 @@ async def test_tts_synthesis(out_rate: int):
     print(f"tts synthesis @ {out_rate} Hz: OK ({len(audio)} chunks, {len(b''.join(f.audio for f in audio))} bytes)")
 
 
+async def test_tts_multi_sentence_turn():
+    """One streamed LLM response is one TTS context: one started, one stopped frame.
+
+    Pipecat sends each sentence as its own text frame (own seq) under a shared
+    context_id. A stop frame per seq made Pipecat treat every sentence as the end
+    of the bot's turn (BotStoppedSpeaking per sentence, context torn down, the
+    assistant turn committed in pieces).
+    """
+    state = new_tts_state()
+    sentences = ["जी, धन्यवाद।", "यह आपकी ईएमआई का reminder है।", "क्या आप यह कर पाएंगे?"]
+    async with serve(fake_bodhi_tts(state), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+        )
+        frames = (
+            [LLMFullResponseStartFrame()]
+            + [TextFrame(s + " ") for s in sentences]
+            + [LLMFullResponseEndFrame(), SleepFrame(sleep=0.5)]
+        )
+        down, up = await run_test(
+            tts,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    started = [f for f in down if isinstance(f, TTSStartedFrame)]
+    stopped = [f for f in down if isinstance(f, TTSStoppedFrame)]
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+
+    assert [t["seq"] for t in state["texts"]] == [1, 2, 3], "one text frame per sentence"
+    assert not errors, f"unexpected error frames: {errors}"
+    assert len(started) == 1, f"expected one TTSStartedFrame, got {len(started)}"
+    assert len(stopped) == 1, f"expected one TTSStoppedFrame for the turn, got {len(stopped)}"
+    assert len(audio) == 6, f"expected audio for every sentence, got {len(audio)} chunks"
+    assert {f.context_id for f in audio} == {started[0].context_id} == {stopped[0].context_id}
+    print(f"tts multi-sentence turn: OK ({len(sentences)} sentences, 1 started, 1 stopped)")
+
+
+async def test_tts_back_to_back_speak_frames():
+    """Each TTSSpeakFrame gets its own context, and audio is routed by seq.
+
+    Routing by the active context instead sent every chunk to the first context
+    and left the others completing with no audio, which Pipecat counts towards
+    marking the service unusable.
+    """
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+        )
+        frames = [TTSSpeakFrame("एक।"), TTSSpeakFrame("दो।"), TTSSpeakFrame("तीन।"), SleepFrame(sleep=0.5)]
+        down, up = await run_test(
+            tts,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+
+    started = [f.context_id for f in down if isinstance(f, TTSStartedFrame)]
+    stopped = [f.context_id for f in down if isinstance(f, TTSStoppedFrame)]
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    chunks_by_context: dict[str, int] = {}
+    for f in down:
+        if isinstance(f, TTSAudioRawFrame):
+            chunks_by_context[f.context_id] = chunks_by_context.get(f.context_id, 0) + 1
+
+    assert not errors, f"unexpected error frames: {errors}"
+    assert len(started) == 3 and started == stopped, f"started {started} vs stopped {stopped}"
+    assert chunks_by_context == {c: 2 for c in started}, f"audio misrouted: {chunks_by_context}"
+    print("tts back-to-back speak frames: OK (3 contexts, 2 chunks each)")
+
+
 async def test_tts_error_is_reported():
     """A server error frame surfaces as an ErrorFrame rather than a hang."""
     state = new_tts_state()
@@ -351,6 +428,8 @@ async def main():
     await test_keepalive_and_settings_update()
     await test_tts_synthesis(24000)
     await test_tts_synthesis(8000)
+    await test_tts_multi_sentence_turn()
+    await test_tts_back_to_back_speak_frames()
     await test_tts_error_is_reported()
     print("all checks passed")
 

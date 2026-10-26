@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] - 2026-10-26
+
+### Fixed
+
+- `BodhiTTSService` pushes one `TTSStoppedFrame` per reply instead of one per sentence. Pipecat sends each sentence of an LLM reply as its own text frame under a shared context and expects a single stop frame when the reply is done; stopping on every `is_last_chunk` made Pipecat treat each sentence as the end of the bot's turn, so `BotStartedSpeaking`/`BotStoppedSpeaking` repeated and the assistant turn was committed in pieces. Bodhi's protocol has no context or flush message, so the service now records which context each `seq` was sent for and implements `flush_audio()`, pushing the stop frame once every `seq` of the flushed context has finished. A text the server rejects with an error no longer holds its context open.
+- Audio is routed by the `seq` in each chunk's header rather than to whichever context is active, so back-to-back `TTSSpeakFrame`s each get their own audio instead of it all landing in the first context and the rest completing with none.
+- `bodhi.__version__` matches the installed version again; 1.3.0 reported `"1.2.0"`.
+
+No wire or public API change. Verified on pipecat-ai 1.4.0 and 1.12.0; `tests/pipecat_smoke_test.py` gains a multi-sentence reply and a back-to-back speak-frame case.
+
+---
+
+## [1.3.0] - 2026-10-13
+
+### Added
+
+- LiveKit Agents integration: `bodhi.integrations.livekit_stt.BodhiSTT` for streaming STT (one-shot `recognize()` works too), and `bodhi.integrations.livekit_tts.BodhiTTS`, which synthesises a whole clip over HTTP or streams text over the websocket as it arrives. Install with `pip install "bodhi-api-sdk[livekit]"`; needs `livekit-agents>=1.0` and Python 3.9+. Verified live end to end in Hindi and Gujarati. `bodhi/examples/livekit_voice_agent.py` is a full voice agent, and `bodhi/examples/livekit_echo_agent.py` repeats back what it hears with no LLM, to try STT and TTS on their own.
+- Both integrations are also published as framework-style plugins that depend on this package: `livekit-plugins-bodhi` (`from livekit.plugins import bodhi`) and `pipecat-bodhi` (`from pipecat_bodhi import BodhiSTTService, BodhiTTSService`).
+- `extra_headers` on `BodhiSTTService`, merged over the default handshake headers so a caller can override them as well as add to them. Deployments that authenticate on more than the key need it: the legacy platform wants `x-customer-id` alongside it.
+
+---
+
+## [1.2.0] - 2026-09-24
+
+Also the first published release of the 1.0.1 changes below: 1.0.1 and 1.1.0
+were version bumps that never reached PyPI.
+
+### Added
+
+- `BodhiTTSClient`, text-to-speech without Pipecat. `synthesize()` returns a whole clip from one HTTP request; `stream()` yields audio over the websocket as it is produced, and takes a list of texts so several utterances share one connection, which is how you speak an LLM's sentences as they arrive. `stream_to_file()` collects a stream into a WAV file. `TTSAudio.save()` writes the WAV header the raw audio lacks, including the μ-law header for telephony that Python's `wave` module refuses to write. Verified against production with 8 kHz μ-law and 24 kHz PCM16; `tests/tts_client_test.py` covers the same paths against a fake server, with no credentials and no network.
+
+---
+
 ## [1.0.1] - 2026-09-22
+
+Not published to PyPI; these changes first shipped in 1.2.0.
 
 ### Added
 

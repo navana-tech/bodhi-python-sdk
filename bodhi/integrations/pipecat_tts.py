@@ -24,8 +24,13 @@ Protocol notes that shape the implementation:
   the server answers with ``ready``. Unknown fields in ``hello`` are rejected
   outright, so settings changes reconnect.
 * Each audio chunk is preceded by a JSON header carrying the ``seq`` of the
-  text frame it belongs to and ``is_last_chunk``, which is what marks the end
-  of an utterance. ``done`` only arrives after ``end`` closes the session.
+  text frame it belongs to and ``is_last_chunk``, which marks the end of that
+  one text frame. There is no context or flush concept on the wire: Pipecat
+  sends one text frame per sentence under a shared ``context_id`` and then
+  calls ``flush_audio``, so the service maps ``seq`` back to the context it
+  was sent for and pushes a single ``TTSStoppedFrame`` once every ``seq`` of
+  a flushed context has finished. ``done`` only arrives after ``end`` closes
+  the session.
 * The server closes a session after ``idle_timeout_s`` (180s on the deployment
   this was written against), so a long-idle agent reconnects on its next turn.
 """
@@ -179,7 +184,8 @@ class BodhiTTSService(InterruptibleTTSService):
 
         super().__init__(
             # Let the base open the audio context and push TTSStartedFrame; the
-            # matching stop frame is pushed from is_last_chunk below.
+            # matching stop frame is pushed from flush_audio once every seq of
+            # the context has finished.
             push_start_frame=True,
             sample_rate=sample_rate,
             settings=default_settings,
@@ -192,7 +198,12 @@ class BodhiTTSService(InterruptibleTTSService):
         self._session_id: str | None = None
         self._seq = 0
         # Set from the JSON header that precedes each binary chunk.
+        self._chunk_seq: int | None = None
         self._chunk_is_last = False
+        # seq -> context_id for every text frame still synthesising, and the
+        # contexts Pipecat has flushed but which still have seqs in flight.
+        self._context_by_seq: dict[int, str] = {}
+        self._closing_contexts: set[str] = set()
 
     def __str__(self):
         # Called from the base constructor, before __init__ sets its attributes.
@@ -344,7 +355,10 @@ class BodhiTTSService(InterruptibleTTSService):
 
             self._session_id = ready.get("session_id")
             self._seq = 0
+            self._chunk_seq = None
             self._chunk_is_last = False
+            self._context_by_seq.clear()
+            self._closing_contexts.clear()
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} ready at {ready.get('sample_rate')} Hz {ready.get('encoding')}")
         except Exception as e:
@@ -385,13 +399,70 @@ class BodhiTTSService(InterruptibleTTSService):
             except Exception as e:
                 logger.warning(f"{self} failed to send end: {e}")
 
+    def _context_for_seq(self, seq: int | None) -> str | None:
+        """Resolve the context a server ``seq`` was sent for.
+
+        Falls back to the active context for a header without a known ``seq``,
+        so a server that stops echoing it still plays audio.
+        """
+        if seq is not None and seq in self._context_by_seq:
+            return self._context_by_seq[seq]
+        return self.get_active_audio_context_id()
+
+    async def _finish_seq(self, seq: int | None):
+        """Mark ``seq`` done and close its context if nothing else is pending."""
+        if seq is None:
+            return
+        context_id = self._context_by_seq.pop(seq, None)
+        if context_id is not None:
+            await self._maybe_close_context(context_id)
+
+    async def _maybe_close_context(self, context_id: str):
+        """Push the stop frame once a flushed context has no seq in flight."""
+        if context_id not in self._closing_contexts:
+            return
+        if context_id in self._context_by_seq.values():
+            return
+        self._closing_contexts.discard(context_id)
+        if not self.audio_context_available(context_id):
+            # Already closed by Pipecat (interrupted, or timed out waiting).
+            return
+        await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+        await self.remove_audio_context(context_id)
+
+    async def flush_audio(self, context_id: str | None = None):
+        """Finish ``context_id`` once every seq sent under it has been received.
+
+        Pipecat calls this after the last sentence of a response has gone to
+        ``run_tts``. Bodhi has no flush command, so the stop frame is pushed
+        here if the audio has already arrived, or from the receive task when
+        the last pending seq's ``is_last_chunk`` lands.
+
+        Args:
+            context_id: The context to finish. Defaults to the active one.
+        """
+        context_id = context_id or self.get_active_audio_context_id()
+        if not context_id:
+            return
+        self._closing_contexts.add(context_id)
+        await self._maybe_close_context(context_id)
+
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Drop the bookkeeping for a context Pipecat has cancelled."""
+        self._closing_contexts.discard(context_id)
+        for seq in [s for s, c in self._context_by_seq.items() if c == context_id]:
+            del self._context_by_seq[seq]
+
     async def _receive_messages(self):
-        """Receive audio and push it into the active audio context."""
+        """Receive audio and push it into the context its seq was sent for."""
         async for message in self._get_websocket():
             if isinstance(message, (bytes, bytearray)):
                 await self.stop_ttfb_metrics()
 
-                context_id = self.get_active_audio_context_id()
+                seq, is_last = self._chunk_seq, self._chunk_is_last
+                self._chunk_seq, self._chunk_is_last = None, False
+
+                context_id = self._context_for_seq(seq)
                 if context_id is None:
                     # Audio for an utterance that has already been interrupted.
                     continue
@@ -404,11 +475,8 @@ class BodhiTTSService(InterruptibleTTSService):
                 )
                 await self.append_to_audio_context(context_id, frame)
 
-                if self._chunk_is_last:
-                    self._chunk_is_last = False
-                    await self.append_to_audio_context(
-                        context_id, TTSStoppedFrame(context_id=context_id)
-                    )
+                if is_last:
+                    await self._finish_seq(seq)
                 continue
 
             try:
@@ -420,12 +488,16 @@ class BodhiTTSService(InterruptibleTTSService):
             kind = content.get("type")
             if kind == "audio":
                 # Header for the binary frame that follows it.
+                self._chunk_seq = content.get("seq")
                 self._chunk_is_last = bool(content.get("is_last_chunk"))
             elif kind == "error":
                 await self.push_error(
                     error_msg=f"{self} Bodhi TTS error {content.get('code')}: "
                     f"{content.get('message')}"
                 )
+                # A per-text error names its seq; that text will produce no
+                # audio, so stop waiting on it.
+                await self._finish_seq(content.get("seq"))
             elif kind == "done":
                 logger.debug(f"{self} session finished: {content}")
             else:
@@ -449,11 +521,13 @@ class BodhiTTSService(InterruptibleTTSService):
             try:
                 await self.start_ttfb_metrics()
                 self._seq += 1
+                self._context_by_seq[self._seq] = context_id
                 await self._get_websocket().send(
                     json.dumps({"type": "text", "seq": self._seq, "target_text": text})
                 )
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
+                self._context_by_seq.pop(self._seq, None)
                 yield ErrorFrame(error=f"{self} failed to send text: {e}")
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
