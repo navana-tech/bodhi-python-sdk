@@ -2,7 +2,7 @@
 Bodhi Python SDK - Streaming Speech Recognition and Text-to-Speech
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.1"
 
 EOF_SIGNAL = '{"eof": 1}'
 
