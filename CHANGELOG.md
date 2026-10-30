@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- `TranscriptionConfig` takes a `language` argument (`hi`, `kn`, `ml`, `mr`, `ta`, `te`), sent in the config frame, and it is now required. The engine serves one model per language and refuses a session without it, so starting a stream or transcribing a file with a config that has no `language` raises a `ConfigurationError` naming the field, before connecting. Existing code needs `language="hi"` (or its own language) added to each `TranscriptionConfig`. It is a new keyword placed last, so positional arguments keep their order.
+
+---
+
 ## [1.3.1] - 2026-10-26
 
 ### Fixed

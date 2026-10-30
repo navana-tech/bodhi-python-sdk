@@ -131,6 +131,13 @@ class TranscriptionHandler:
             )
             raise ConfigurationError(json.dumps(error_msg))
 
+        if not getattr(config, "language", None):
+            error_msg = make_error_response(
+                message="language is a required argument (hi, kn, ml, mr, ta, te) - set it on the transcription config.",
+                code=BodhiErrors.BadRequest.value,
+            )
+            raise ConfigurationError(json.dumps(error_msg))
+
         if not hasattr(config, "sample_rate") or config.sample_rate is None:
             error_msg = make_error_response(
                 message="sample_rate is a required argument - transcription config must be defined.",

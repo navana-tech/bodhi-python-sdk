@@ -69,7 +69,7 @@ async def main():
 
     await client.transcribe_local_file(
         "call.wav",
-        TranscriptionConfig(model="hi-banking-v2-8khz", sample_rate=8000),
+        TranscriptionConfig(model="vaak-v0-banking", language="hi", sample_rate=8000),
     )
 
 
@@ -89,7 +89,8 @@ also picks a single channel out of a stereo call recording.
 
 ```python
 TranscriptionConfig(
-    model="hi-banking-v2-8khz",       # required
+    model="vaak-v0-banking",          # required
+    language="hi",                    # required: language of the audio, see the table below
     sample_rate=8000,                 # match your audio: 8000 for telephony
     parse_number=True,                # "तीन लाख अस्सी हजार" -> "380000"
     exclude_partial=True,             # finals only, less traffic
@@ -101,7 +102,8 @@ TranscriptionConfig(
 
 | Field | Default | Notes |
 |---|---|---|
-| `model` | required | e.g. `hi-banking-v2-8khz`; banking or general, per language |
+| `model` | required | e.g. `vaak-v0-banking`; the models your account can use are listed in the playground's model menu |
+| `language` | required | language code of the audio: `hi`, `kn`, `ml`, `mr`, `ta` or `te`. The engine serves one model per language, so a session without it is refused |
 | `sample_rate` | `8000` | must match the audio |
 | `parse_number` | `False` | spoken numbers become numerals |
 | `exclude_partial` | `False` | stop the server sending partial results |

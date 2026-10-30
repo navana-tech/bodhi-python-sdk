@@ -27,6 +27,7 @@ class TranscriptionConfig:
         endpoint_silence_duration: Optional[float] = None,
         at_start_lid: Optional[bool] = False,
         transliterate: Optional[bool] = False,
+        language: Optional[str] = None,
     ):
         self.model = model
         self.transaction_id = transaction_id or str(uuid.uuid4())
@@ -41,11 +42,18 @@ class TranscriptionConfig:
         self.endpoint_silence_duration = endpoint_silence_duration
         self.at_start_lid = at_start_lid
         self.transliterate = transliterate
+        # Language code of the audio (hi, kn, ml, mr, ta, te). Required on every
+        # session: the engine serves one model per language and refuses a stream
+        # without one. Like sample_rate it defaults to None here and is checked when
+        # the session starts (TranscriptionHandler._prepare_config), which raises a
+        # ConfigurationError naming the field rather than failing at construction.
+        self.language = language
 
     def to_dict(self):
         """Convert Config instance to dictionary with JSON-serializable values"""
         config_dict = {
             "model": self.model,
+            "language": self.language,
             "transaction_id": self.transaction_id,
             "parse_number": self.parse_number,
             "aux": self.aux,

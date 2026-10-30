@@ -77,6 +77,7 @@ async def main():
     # Config with new params
     config = TranscriptionConfig(
         model="hi-banking-v2-8khz",
+        language="hi",
         at_start_lid=True,     # Enable language identification
         transliterate=False,   # Disable transliteration
     )
