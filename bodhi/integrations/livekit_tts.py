@@ -83,6 +83,53 @@ def _normalize_lang(language: str) -> str:
     return str(language).split("-")[0].lower()
 
 
+def validate_g2p_overrides(overrides: Any) -> dict[str, Any] | None:
+    """Check the shape of a pronunciation override map before it is sent.
+
+    The map is ``{"WORD": "<phonemes>"}`` or ``{"WORD": {"tokens": "<phonemes>",
+    "lang": "en"}}``; phonemes are space-separated IPA tokens, as the platform's
+    Pronunciation page generates them. Only the shape is checked here: whether
+    every token is in the model's vocabulary is known only to the server, which
+    rejects a bad map with ``invalid g2p_overrides`` (HTTP 400 on ``/tts/bytes``,
+    a fatal error on the first text frame of a websocket session).
+
+    Returns:
+        The map, or ``None`` when empty.
+
+    Raises:
+        ValueError: If the map is malformed.
+    """
+    if overrides is None:
+        return None
+    if not isinstance(overrides, dict):
+        raise ValueError(f"g2p_overrides must be a dict, got {type(overrides).__name__}")
+    if not overrides:
+        return None
+    for word, entry in overrides.items():
+        if not isinstance(word, str) or not word.strip():
+            raise ValueError(f"g2p_overrides keys must be non-empty words, got {word!r}")
+        if isinstance(entry, str):
+            tokens = entry
+        elif isinstance(entry, dict):
+            tokens = entry.get("tokens")
+            lang = entry.get("lang")
+            if lang is not None and not isinstance(lang, str):
+                raise ValueError(f"g2p_overrides[{word!r}].lang must be a string, got {lang!r}")
+            extra = set(entry) - {"tokens", "lang"}
+            if extra:
+                raise ValueError(f"g2p_overrides[{word!r}] has unknown fields {sorted(extra)}")
+        else:
+            raise ValueError(
+                f"g2p_overrides[{word!r}] must be a phoneme string or "
+                f'{{"tokens": ..., "lang": ...}}, got {type(entry).__name__}'
+            )
+        if not isinstance(tokens, str) or not tokens.strip():
+            raise ValueError(f"g2p_overrides[{word!r}] needs a non-empty phoneme string")
+    # A copy, so a caller mutating their dict later does not change a session
+    # or request already built from it.
+    return {w: dict(e) if isinstance(e, dict) else e for w, e in overrides.items()}
+
+
 @dataclass
 class _TTSOptions:
     api_key: str
@@ -93,6 +140,7 @@ class _TTSOptions:
     use_fast: bool
     num_step: int | None
     guidance_scale: float | None
+    g2p_overrides: dict[str, Any] | None = None
 
     @property
     def output_format(self) -> str:
@@ -141,6 +189,7 @@ class BodhiTTS(tts.TTS):
         use_fast: bool = False,
         num_step: int | None = None,
         guidance_scale: float | None = None,
+        g2p_overrides: dict[str, Any] | None = None,
         http_session: aiohttp.ClientSession | None = None,
     ) -> None:
         """Create a Bodhi TTS provider.
@@ -157,6 +206,13 @@ class BodhiTTS(tts.TTS):
             use_fast: Use the distilled model where one is available.
             num_step: Flow-matching steps, 1-100. Lower is faster and rougher.
             guidance_scale: Classifier-free guidance.
+            g2p_overrides: Pronunciation overrides, as ``{"WORD": "<phonemes>"}``
+                or ``{"WORD": {"tokens": "<phonemes>", "lang": "en"}}`` to
+                render that word in another language's accent. Phonemes are
+                space-separated IPA tokens; copy them from the platform's
+                Pronunciation page (Generate Phoneme). Words match
+                case-insensitively. Sent on every request and on every
+                websocket session's hello.
             http_session: An existing aiohttp session to reuse; one is created
                 lazily otherwise.
         """
@@ -186,6 +242,7 @@ class BodhiTTS(tts.TTS):
             use_fast=use_fast,
             num_step=num_step,
             guidance_scale=guidance_scale,
+            g2p_overrides=validate_g2p_overrides(g2p_overrides),
         )
         self._session = http_session
 
@@ -202,8 +259,12 @@ class BodhiTTS(tts.TTS):
         use_fast: bool | None = None,
         num_step: int | None = None,
         guidance_scale: float | None = None,
+        g2p_overrides: dict[str, Any] | None = None,
     ) -> None:
-        """Change synthesis options for subsequent requests."""
+        """Change synthesis options for subsequent requests.
+
+        ``g2p_overrides`` replaces the whole map; pass ``{}`` to clear it.
+        """
         if voice is not None:
             self._opts.voice = voice
         if language is not None:
@@ -214,6 +275,8 @@ class BodhiTTS(tts.TTS):
             self._opts.num_step = num_step
         if guidance_scale is not None:
             self._opts.guidance_scale = guidance_scale
+        if g2p_overrides is not None:
+            self._opts.g2p_overrides = validate_g2p_overrides(g2p_overrides)
 
     def synthesize(
         self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
@@ -240,6 +303,9 @@ def _hello_frame(opts: _TTSOptions) -> dict[str, Any]:
         hello["num_step"] = opts.num_step
     if opts.guidance_scale is not None:
         hello["guidance_scale"] = opts.guidance_scale
+    if opts.g2p_overrides:
+        # The hello schema takes scalars only, so the map goes as a string.
+        hello["g2p_overrides_json"] = json.dumps(opts.g2p_overrides, ensure_ascii=False)
     return hello
 
 
@@ -265,6 +331,8 @@ class ChunkedStream(tts.ChunkedStream):
             body["num_step"] = self._opts.num_step
         if self._opts.guidance_scale is not None:
             body["guidance_scale"] = self._opts.guidance_scale
+        if self._opts.g2p_overrides:
+            body["g2p_overrides"] = self._opts.g2p_overrides
 
         try:
             async with self._tts._ensure_session().post(
