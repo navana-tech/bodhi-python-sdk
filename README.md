@@ -287,6 +287,37 @@ Because Bodhi's TTS has no cancel command, the service is built on Pipecat's
 leaving stale audio in flight. Interruption handling therefore behaves as it
 does with any other Pipecat TTS service.
 
+To fix how a word is said, for example an acronym the engine reads as a Hindi
+word, pass a pronunciation map:
+
+```python
+tts = BodhiTTSService(
+    api_key=os.environ["BODHI_API_KEY"],
+    language=Language.HI,
+    voice="bhavana",
+    settings=BodhiTTSService.Settings(
+        g2p_overrides={
+            "NACH": "n a ː t ʃ",                               # said as "naach"
+            "KUMAR": {"tokens": "k u m a ː r", "lang": "en"},  # in the English accent
+        }
+    ),
+)
+```
+
+The value is the word's phonemes, space-separated IPA tokens. Do not write
+them by hand: open the platform's **Pronunciation** page, enter the word and a
+spelling of how it should sound, press *Generate Phoneme*, listen, and copy the
+string. Words match case-insensitively. The map is sent once per session and
+applies to every sentence; changing it reconnects. Dictionaries saved on the
+platform are **not** applied on the public API host, so this is how an agent
+reaches them. A map with a symbol the model does not know is rejected by the
+server on the first sentence, not at connect time. The service reports that
+once as a permanent error and stops sending that hello; whether the pipeline
+then stops is your `PipelineTask`'s `processor_unusable_policy` (the default
+`CONTINUE` keeps it running with a silent TTS, `CANCEL` stops it), so watch
+`on_pipeline_error` or set the policy. The LiveKit integration takes the same
+map as `BodhiTTS(g2p_overrides=...)`.
+
 ### Advanced features
 
 Every field from the streaming

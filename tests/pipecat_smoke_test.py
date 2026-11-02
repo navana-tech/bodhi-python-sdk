@@ -218,12 +218,14 @@ def new_tts_state():
     return {"headers": {}, "connections": 0, "hellos": [], "texts": [], "end": False}
 
 
-def fake_bodhi_tts(state, *, chunks=2, error=None):
+def fake_bodhi_tts(state, *, chunks=2, error=None, fatal_error=None):
     """A stand-in for Bodhi TTS: hello/ready, then audio headers + binary chunks.
 
     Mirrors the wire protocol the service expects -- every binary frame is
     preceded by its JSON header, and only the last header of a text frame
-    carries ``is_last_chunk``.
+    carries ``is_last_chunk``. ``fatal_error`` is the message of a fatal error
+    sent for the first text frame, the way the server rejects a bad
+    ``g2p_overrides_json``: after ``ready``, not instead of it.
     """
 
     async def handler(ws):
@@ -250,6 +252,21 @@ def fake_bodhi_tts(state, *, chunks=2, error=None):
 
             elif kind == "text":
                 state["texts"].append(data)
+                if fatal_error is not None:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "code": "bad_request",
+                                "message": fatal_error,
+                                "fatal": True,
+                                "seq": data["seq"],
+                            }
+                        )
+                    )
+                    # The real server closes with 1008 after a fatal error.
+                    await ws.close(code=1008, reason="bad_request")
+                    return
                 if error is not None:
                     await ws.send(
                         json.dumps(
@@ -421,6 +438,120 @@ async def test_tts_error_is_reported():
     print("tts error reporting: OK (bad_voice surfaced)")
 
 
+async def test_tts_g2p_overrides():
+    """The override map rides the hello as a JSON string, and only when set."""
+    overrides = {"NACH": "n a ː t ʃ", "KUMAR": {"tokens": "k u m a ː r", "lang": "en"}}
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state), "127.0.0.1", 0) as server:
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=url,
+            settings=BodhiTTSService.Settings(g2p_overrides=overrides),
+        )
+        down, up = await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame("नमस्ते"), SleepFrame(sleep=0.5)],
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+        plain = BodhiTTSService(api_key="test-key", url=url)
+        await run_test(
+            plain,
+            frames_to_send=[TTSSpeakFrame("नमस्ते"), SleepFrame(sleep=0.5)],
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+
+    with_map, without_map = state["hellos"]
+    assert json.loads(with_map["g2p_overrides_json"]) == overrides, with_map
+    assert "g2p_overrides" not in with_map, "the object form is for /tts/bytes only"
+    assert "g2p_overrides_json" not in without_map, "unset knobs must stay out of hello"
+    assert not [f for f in down + up if isinstance(f, ErrorFrame)]
+    assert [f for f in down if isinstance(f, TTSAudioRawFrame)], "no audio with overrides set"
+
+    for bad in ({"NACH": ""}, {"NACH": 3}, {"": "n a ː t ʃ"}, ["NACH"], {"NACH": {"lang": "en"}}):
+        try:
+            BodhiTTSService(api_key="k", url=url, settings=BodhiTTSService.Settings(g2p_overrides=bad))
+        except ValueError:
+            continue
+        raise AssertionError(f"malformed g2p_overrides accepted: {bad!r}")
+    print("tts g2p overrides: OK (hello carries the map as a string; malformed maps refused)")
+
+
+async def test_tts_invalid_g2p_is_fatal():
+    """A server-side g2p rejection stops the pipeline instead of muting it.
+
+    The server answers ``ready`` and only rejects the map on the first text
+    frame, with ``fatal: true``. Reconnecting would repeat the same hello, so
+    the service reports it once as a permanent error (processor unusable on
+    Pipecat 1.8+, a fatal ErrorFrame before that) and stops reconnecting: a
+    second sentence must not open a second connection.
+    """
+    message = "invalid g2p_overrides: G2P override for 'NACH' contains tokens not in the vocabulary: ['naach']"
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state, fatal_error=message), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+            settings=BodhiTTSService.Settings(g2p_overrides={"NACH": "naach"}),
+        )
+        down, up = await run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame("नमस्ते"),
+                SleepFrame(sleep=0.5),
+                TTSSpeakFrame("फिर से"),
+                SleepFrame(sleep=0.5),
+            ],
+            pipeline_params=PipelineParams(audio_out_sample_rate=24000),
+        )
+
+    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
+    rejection = [f for f in errors if "invalid g2p_overrides" in str(f.error)]
+    assert rejection, f"g2p rejection was swallowed: {errors}"
+    assert "NACH" in rejection[0].error, rejection[0]
+    permanent = rejection[0].fatal or (hasattr(tts, "is_usable") and not tts.is_usable)
+    assert permanent, f"g2p rejection was reported as recoverable: {rejection[0]}"
+    assert not [f for f in down if isinstance(f, TTSAudioRawFrame)], "audio despite the rejection"
+    assert state["connections"] == 1, f"reconnected into the same bad hello: {state['connections']}"
+    assert len(state["texts"]) == 1, "second sentence was sent after the rejection"
+    print("tts invalid g2p overrides: OK (reported once as permanent, no reconnect)")
+
+
+async def test_tts_g2p_rejection_guards():
+    """The SDK's own guards, independent of what Pipecat does with an unusable service.
+
+    On Pipecat 1.8+ the base classes already skip an unusable service and refuse
+    to reconnect it, so the end-to-end case above passes without exercising the
+    SDK side. Drive the service directly: once a rejection is recorded, connecting
+    is a no-op (no hello reaches the server) and run_tts yields an error and a stop
+    frame without touching the socket; replacing the map clears the rejection.
+    """
+    state = new_tts_state()
+    async with serve(fake_bodhi_tts(state), "127.0.0.1", 0) as server:
+        tts = BodhiTTSService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+            settings=BodhiTTSService.Settings(g2p_overrides={"NACH": "naach"}),
+        )
+        tts._g2p_rejected = "invalid g2p_overrides: test"
+        await tts._connect_websocket()
+        assert tts._websocket is None and not state["hellos"], "connected despite a rejection"
+
+        frames = [f async for f in tts.run_tts("नमस्ते", "ctx-1")]
+        assert any(isinstance(f, ErrorFrame) for f in frames), frames
+        assert any(isinstance(f, TTSStoppedFrame) for f in frames), frames
+        assert not state["texts"] and state["connections"] == 0, "run_tts touched the socket"
+
+        tts._g2p_rejected = None
+        # The output rate is normally learned from StartFrame; the service is
+        # driven directly here, so set it the way the pipeline would.
+        tts._output_sample_rate = 24000
+        await tts._connect_websocket()
+        assert len(state["hellos"]) == 1, "a cleared rejection must connect again"
+        await tts._disconnect_websocket()
+    print("tts g2p rejection guards: OK (no hello, no text while rejected)")
+
+
 async def main():
     await test_transcription(16000)
     await test_transcription(24000)
@@ -431,6 +562,9 @@ async def main():
     await test_tts_multi_sentence_turn()
     await test_tts_back_to_back_speak_frames()
     await test_tts_error_is_reported()
+    await test_tts_g2p_overrides()
+    await test_tts_invalid_g2p_is_fatal()
+    await test_tts_g2p_rejection_guards()
     print("all checks passed")
 
 

@@ -33,8 +33,22 @@ Protocol notes that shape the implementation:
   the session.
 * The server closes a session after ``idle_timeout_s`` (180s on the deployment
   this was written against), so a long-idle agent reconnects on its next turn.
+* Pronunciation overrides travel in ``hello`` as ``g2p_overrides_json``, the
+  override map serialised to a string (the hello schema takes scalars only).
+  They apply to every text frame of the session and cannot change mid-session,
+  so a new map reconnects like any other setting. The server validates the map
+  on the first text frame, not on hello: a bad one answers ``ready`` and then
+  fails every sentence with a fatal ``invalid g2p_overrides`` error. The
+  service reports that once as a permanent error and stops sending that
+  hello, instead of reconnecting into the same error for every sentence.
+  On Pipecat 1.8+ the processor is marked unusable and the ``PipelineTask``'s
+  ``processor_unusable_policy`` decides what happens next: the default,
+  ``CONTINUE``, keeps the pipeline running with a silent TTS, ``CANCEL``
+  stops it. On older Pipecat the fatal ``ErrorFrame`` cancels the pipeline.
+  Replacing ``g2p_overrides`` clears the rejection and reconnects.
 """
 
+import inspect
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -62,6 +76,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -112,6 +127,69 @@ def language_to_bodhi_language(language: Language) -> str:
     return str(language.value).split("-")[0].lower()
 
 
+#: A server-side rejection of the hello's pronunciation map. The server only
+#: checks the map when it tokenizes the first text frame, so this arrives as a
+#: fatal per-text error rather than a refused handshake.
+G2P_ERROR_PREFIX = "invalid g2p_overrides"
+
+# Pipecat >= 1.8 marks a processor unusable through push_error(...,
+# force_treat_as_permanent=True) and lets the PipelineTask's
+# processor_unusable_policy decide what happens; earlier versions only have the
+# ErrorFrame.fatal flag, which cancels the pipeline outright.
+_PUSH_ERROR_PERMANENT = (
+    "force_treat_as_permanent" in inspect.signature(FrameProcessor.push_error).parameters
+)
+
+
+def validate_g2p_overrides(overrides: Any) -> dict[str, Any] | None:
+    """Check the shape of a pronunciation override map before it is sent.
+
+    The map is ``{"WORD": "<phonemes>"}`` or ``{"WORD": {"tokens": "<phonemes>",
+    "lang": "en"}}``; phonemes are space-separated IPA tokens, as the platform's
+    Pronunciation page generates them. Only the shape is checked here: whether
+    every token is in the model's vocabulary is known only to the server.
+
+    Args:
+        overrides: The map to check. ``None`` and ``{}`` mean no overrides.
+
+    Returns:
+        The map, or ``None`` when empty.
+
+    Raises:
+        ValueError: If the map is not a dict of non-empty strings to a non-empty
+            phoneme string or a ``{"tokens", "lang"}`` object.
+    """
+    if overrides is None:
+        return None
+    if not isinstance(overrides, dict):
+        raise ValueError(f"g2p_overrides must be a dict, got {type(overrides).__name__}")
+    if not overrides:
+        return None
+    for word, entry in overrides.items():
+        if not isinstance(word, str) or not word.strip():
+            raise ValueError(f"g2p_overrides keys must be non-empty words, got {word!r}")
+        if isinstance(entry, str):
+            tokens = entry
+        elif isinstance(entry, dict):
+            tokens = entry.get("tokens")
+            lang = entry.get("lang")
+            if lang is not None and not isinstance(lang, str):
+                raise ValueError(f"g2p_overrides[{word!r}].lang must be a string, got {lang!r}")
+            extra = set(entry) - {"tokens", "lang"}
+            if extra:
+                raise ValueError(f"g2p_overrides[{word!r}] has unknown fields {sorted(extra)}")
+        else:
+            raise ValueError(
+                f"g2p_overrides[{word!r}] must be a phoneme string or "
+                f'{{"tokens": ..., "lang": ...}}, got {type(entry).__name__}'
+            )
+        if not isinstance(tokens, str) or not tokens.strip():
+            raise ValueError(f"g2p_overrides[{word!r}] needs a non-empty phoneme string")
+    # A copy, so a caller mutating their dict later does not change a session
+    # or request already built from it.
+    return {w: dict(e) if isinstance(e, dict) else e for w, e in overrides.items()}
+
+
 @dataclass
 class BodhiTTSSettings(TTSSettings):
     """Runtime-updatable settings for :class:`BodhiTTSService`.
@@ -122,11 +200,19 @@ class BodhiTTSSettings(TTSSettings):
         use_fast: Use the distilled model where one is available.
         num_step: Flow-matching steps, 1-100. Lower is faster and rougher.
         guidance_scale: Classifier-free guidance.
+        g2p_overrides: Pronunciation overrides for the session, as
+            ``{"WORD": "<phonemes>"}`` or ``{"WORD": {"tokens": "<phonemes>",
+            "lang": "en"}}`` to render that word in another language's accent.
+            Phonemes are space-separated IPA tokens; copy them from the
+            platform's Pronunciation page (Generate Phoneme) rather than
+            writing them by hand. Words match case-insensitively. Applies to
+            every sentence of the session; changing it reconnects.
     """
 
     use_fast: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     num_step: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     guidance_scale: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    g2p_overrides: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class BodhiTTSService(InterruptibleTTSService):
@@ -178,9 +264,11 @@ class BodhiTTSService(InterruptibleTTSService):
             use_fast=False,
             num_step=None,
             guidance_scale=None,
+            g2p_overrides=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
+        validate_g2p_overrides(assert_given(default_settings.g2p_overrides))
 
         super().__init__(
             # Let the base open the audio context and push TTSStartedFrame; the
@@ -204,6 +292,10 @@ class BodhiTTSService(InterruptibleTTSService):
         # contexts Pipecat has flushed but which still have seqs in flight.
         self._context_by_seq: dict[int, str] = {}
         self._closing_contexts: set[str] = set()
+        # The server's message when it rejected g2p_overrides; set once and
+        # cleared when the setting changes, so run_tts stops reconnecting
+        # into the same bad hello.
+        self._g2p_rejected: str | None = None
 
     def __str__(self):
         # Called from the base constructor, before __init__ sets its attributes.
@@ -274,8 +366,22 @@ class BodhiTTSService(InterruptibleTTSService):
 
         Returns:
             Dict mapping changed field names to their previous values.
+
+        Raises:
+            ValueError: If ``delta.g2p_overrides`` is malformed; nothing is
+                applied and the session stays up.
         """
+        overrides = getattr(delta, "g2p_overrides", NOT_GIVEN)
+        if not isinstance(overrides, NotGiven):
+            validate_g2p_overrides(overrides)
         changed = await super()._update_settings(delta)
+        if "g2p_overrides" in changed and self._g2p_rejected is not None:
+            # A different map may be valid: forget the rejection and, on
+            # Pipecat 1.8+, take the processor back out of the unusable state
+            # the rejection put it in, so the reconnect below gets to try it.
+            self._g2p_rejected = None
+            if hasattr(self, "set_usable"):
+                await self.set_usable(True)
         if changed:
             await self._disconnect()
             await self._connect()
@@ -323,11 +429,24 @@ class BodhiTTSService(InterruptibleTTSService):
         guidance_scale = assert_given(s.guidance_scale)
         if guidance_scale is not None:
             hello["guidance_scale"] = guidance_scale
+        overrides = validate_g2p_overrides(assert_given(s.g2p_overrides))
+        if overrides:
+            # The hello schema takes scalars only, so the map goes as a string.
+            hello["g2p_overrides_json"] = json.dumps(overrides, ensure_ascii=False)
 
         return hello
 
     async def _connect_websocket(self):
-        """Open the websocket and complete the hello/ready handshake."""
+        """Open the websocket and complete the hello/ready handshake.
+
+        Does nothing while the server has rejected ``g2p_overrides``: every
+        reconnect, whether from ``run_tts`` or from the base class's own
+        retry loop, would send the same hello and fail the same way.
+        """
+        if self._g2p_rejected is not None:
+            logger.error(f"{self} not connecting: {self._g2p_rejected}")
+            self._websocket = None
+            return
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -491,10 +610,16 @@ class BodhiTTSService(InterruptibleTTSService):
                 self._chunk_seq = content.get("seq")
                 self._chunk_is_last = bool(content.get("is_last_chunk"))
             elif kind == "error":
-                await self.push_error(
-                    error_msg=f"{self} Bodhi TTS error {content.get('code')}: "
-                    f"{content.get('message')}"
+                error_msg = (
+                    f"{self} Bodhi TTS error {content.get('code')}: {content.get('message')}"
                 )
+                rejected = content.get("fatal") and str(content.get("message") or "").startswith(
+                    G2P_ERROR_PREFIX
+                )
+                if rejected:
+                    await self._report_g2p_rejection(error_msg)
+                else:
+                    await self.push_error(error_msg=error_msg)
                 # A per-text error names its seq; that text will produce no
                 # audio, so stop waiting on it.
                 await self._finish_seq(content.get("seq"))
@@ -502,6 +627,30 @@ class BodhiTTSService(InterruptibleTTSService):
                 logger.debug(f"{self} session finished: {content}")
             else:
                 logger.trace(f"{self} ignoring message: {message}")
+
+    async def _report_g2p_rejection(self, error_msg: str):
+        """Report a rejected ``g2p_overrides`` map once, as a permanent error.
+
+        The server validates the map on the first text frame, so every
+        reconnect would send the same hello and fail the same way, which from
+        the outside is a bot that connects fine and never speaks. Remember the
+        rejection so ``_connect_websocket`` stops sending that hello, and
+        report it the way the installed Pipecat expects a processor to say it
+        can no longer do its job: ``push_error(force_treat_as_permanent=True)``
+        on 1.8+, where the task's ``processor_unusable_policy`` decides between
+        continuing (the default: the pipeline runs on with a silent TTS),
+        ending and cancelling; a fatal ``ErrorFrame`` (always a cancel) before
+        that.
+        """
+        if self._g2p_rejected is not None:
+            return
+        self._g2p_rejected = f"{error_msg} (fix the g2p_overrides setting)"
+        if _PUSH_ERROR_PERMANENT:
+            await self.push_error(error_msg=self._g2p_rejected, force_treat_as_permanent=True)
+        else:
+            await self.push_frame(
+                ErrorFrame(error=self._g2p_rejected, fatal=True), FrameDirection.UPSTREAM
+            )
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
@@ -515,6 +664,12 @@ class BodhiTTSService(InterruptibleTTSService):
             None; audio arrives asynchronously on the receive task.
         """
         try:
+            if self._g2p_rejected is not None:
+                # Already reported; a reconnect would fail the same way.
+                yield ErrorFrame(error=self._g2p_rejected)
+                yield TTSStoppedFrame(context_id=context_id)
+                return
+
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 

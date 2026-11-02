@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Pronunciation overrides on the voice-agent integrations. `BodhiTTSService` (Pipecat) takes `Settings(g2p_overrides={"WORD": "<phonemes>"})` and `BodhiTTS` (LiveKit) takes `g2p_overrides=` in the constructor and `update_options`. The map is `{"WORD": "n a ː t ʃ"}`, or `{"WORD": {"tokens": "...", "lang": "en"}}` to render a word in another language's accent; phonemes are the space-separated IPA tokens the platform's Pronunciation page generates. On the websocket it is sent once per session in the `hello` as `g2p_overrides_json` (the hello schema takes scalars only) and applies to every sentence; on `/tts/bytes` it is the plain `g2p_overrides` object. Changing it on Pipecat reconnects, like any other setting. The public `tts.navana.ai` host does not apply dictionaries saved on the platform, so this is the only way to reach them from an agent.
+- Malformed maps (not a dict, empty word, empty or non-string phonemes, unknown fields in the object form) are refused with `ValueError` before anything is sent.
+
+### Fixed
+
+- `BodhiTTSService` reports a rejected pronunciation map once instead of once per sentence. The server only validates `g2p_overrides_json` when it tokenizes the first text frame, so a bad map gets `ready` and then a fatal `invalid g2p_overrides` error on every sentence, and the service reconnected with the same hello each time. It now reports the rejection once as a permanent error and stops sending that hello. On Pipecat 1.8+ that is `push_error(force_treat_as_permanent=True)`, so the task's `processor_unusable_policy` decides what happens: the default `CONTINUE` keeps the pipeline running with a silent TTS, `CANCEL` stops it. On older Pipecat the fatal `ErrorFrame` cancels the pipeline. Replacing `g2p_overrides` clears the rejection and reconnects.
+
+No change for callers that do not set the option. `tests/pipecat_smoke_test.py` gains a hello/validation case, a rejected-map case and a case for the SDK-side guards. Verified on pipecat-ai 1.12.0; the fatal `ErrorFrame` fallback for older Pipecat is not exercised by the tests.
+
+---
+
 ## [1.3.1] - 2026-10-26
 
 ### Fixed
